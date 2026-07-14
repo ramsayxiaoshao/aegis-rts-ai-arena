@@ -26,6 +26,12 @@ public class GameBootstrap : MonoBehaviour
     [Header("Building Settings")]
     [SerializeField] private float buildingRadius = 0.42f;
 
+    [Header("Resource Settings")]
+    [SerializeField] private int startingResources = 500;
+    [SerializeField] private int factoryCost = 150;
+
+    private int playerResources;
+
     private class BuildingData
     {
         public string DisplayName;
@@ -179,7 +185,7 @@ public class GameBootstrap : MonoBehaviour
         {
             Rect factoryRect = new Rect(panelX + 15f, panelY + 80f, panelWidth - 30f, 35f);
 
-            if (GUI.Button(factoryRect, "兵厂"))
+            if (GUI.Button(factoryRect, $"兵厂 ({factoryCost})"))
             {
                 SelectFactory();
                 isBuildMenuOpen = false;
@@ -228,6 +234,11 @@ public class GameBootstrap : MonoBehaviour
             new Rect(20, 20, 650, 30),
             "操作提示：点击右侧“建筑菜单” → 选择“兵厂” → 移动鼠标预览 → 鼠标右键确认建造。"
         );
+
+        GUI.Label(
+            new Rect(20, 50, 500, 30),
+            $"资源：{playerResources}    兵厂成本：{factoryCost}"
+        );
     }
 
     private void StartGame()
@@ -245,6 +256,8 @@ public class GameBootstrap : MonoBehaviour
 
     private void CreateGameWorld()
     {
+        playerResources = startingResources;
+
         gridRoot = new GameObject("GridRoot").transform;
         buildingRoot = new GameObject("BuildingRoot").transform;
 
@@ -253,6 +266,8 @@ public class GameBootstrap : MonoBehaviour
         CreateBuildRangeObject();
         CreatePlacementPreviewObject();
         CreateSelectionRingObject();
+
+        Debug.Log($"Starting resources: {playerResources}");
     }
 
     private void SetupCamera()
@@ -392,6 +407,12 @@ public class GameBootstrap : MonoBehaviour
 
     private void SelectFactory()
     {
+        if (!CanAffordBuilding(BuildingType.Factory))
+        {
+            Debug.LogWarning($"Cannot select Factory: not enough resources. Need {factoryCost}, have {playerResources}.");
+            return;
+        }
+
         selectedBuilding = BuildingType.Factory;
         hasPreviewCell = false;
 
@@ -552,7 +573,15 @@ public class GameBootstrap : MonoBehaviour
 
         if (!canBuild)
         {
-            Debug.LogWarning("Cannot build here: out of range or cell is occupied.");
+            if (!CanAffordBuilding(selectedBuilding))
+            {
+                Debug.LogWarning($"Cannot build: not enough resources. Need {GetBuildingCost(selectedBuilding)}, have {playerResources}.");
+            }
+            else
+            {
+                Debug.LogWarning("Cannot build here: out of range or cell is occupied.");
+            }
+
             return;
         }
 
@@ -561,6 +590,8 @@ public class GameBootstrap : MonoBehaviour
 
     private void BuildFactory(Vector2 position, Vector2Int cell)
     {
+        playerResources -= factoryCost;
+
         GameObject factoryObject = CreateCircleObject(
             "Factory",
             position,
@@ -584,12 +615,32 @@ public class GameBootstrap : MonoBehaviour
         
         occupiedCells.Add(cell);
 
-        Debug.Log($"Factory built at cell {cell}");
+        Debug.Log($"Factory built at cell {cell}. Remaining resources: {playerResources}");
+    }
+
+    private int GetBuildingCost(BuildingType buildingType)
+    {
+        if (buildingType == BuildingType.Factory)
+        {
+            return factoryCost;
+        }
+
+        return 0;
+    }
+
+    private bool CanAffordBuilding(BuildingType buildingType)
+    {
+        return playerResources >= GetBuildingCost(buildingType);
     }
 
     private bool CanBuildAt(Vector2 worldPosition, Vector2Int cell)
     {
         if (!IsInsideMap(worldPosition))
+        {
+            return false;
+        }
+
+        if (!CanAffordBuilding(selectedBuilding))
         {
             return false;
         }
