@@ -38,6 +38,7 @@ public class GameBootstrap : MonoBehaviour
 
     [Header("Unit Settings")]
     [SerializeField] private float infantryRadius = 0.42f;
+    [SerializeField] private float unitMoveSpeed = 5f;
 
     private int playerResources;
 
@@ -79,6 +80,11 @@ public class GameBootstrap : MonoBehaviour
         public Vector2 Position;
         public Vector2Int Cell;
         public float Radius;
+        public string Description;
+
+        public bool IsMoving;
+        public Vector2 TargetPosition;
+        public Vector2Int TargetCell;
 
         public UnitData(
             string displayName,
@@ -86,7 +92,8 @@ public class GameBootstrap : MonoBehaviour
             GameObject gameObject,
             Vector2 position,
             Vector2Int cell,
-            float radius
+            float radius,
+            string description
         )
         {
             DisplayName = displayName;
@@ -95,6 +102,11 @@ public class GameBootstrap : MonoBehaviour
             Position = position;
             Cell = cell;
             Radius = radius;
+            Description = description;
+
+            IsMoving = false;
+            TargetPosition = position;
+            TargetCell = cell;
         }
     }
 
@@ -127,6 +139,7 @@ public class GameBootstrap : MonoBehaviour
     private BuildingData selectedBuildingData = null;
 
     private readonly List<UnitData> units = new List<UnitData>();
+    private UnitData selectedUnitData = null;
 
     private readonly HashSet<Vector2Int> occupiedCells = new HashSet<Vector2Int>();
 
@@ -148,8 +161,10 @@ public class GameBootstrap : MonoBehaviour
         }
 
         HandleSelectionInput();
+        HandleUnitMoveCommand();
         HandlePlacementPreview();
         HandlePlacementConfirm();
+        UpdateUnitMovement();
     }
 
     private void OnGUI()
@@ -260,11 +275,23 @@ public class GameBootstrap : MonoBehaviour
                 selectedBuildingData.Description
             );
         }
+        else if (selectedUnitData != null)
+        {
+            GUI.Label(
+                new Rect(panelX + 25f, panelY + 245f, panelWidth - 50f, 25f),
+                "选中单位：" + selectedUnitData.DisplayName
+            );
+
+            GUI.Label(
+                new Rect(panelX + 25f, panelY + 270f, panelWidth - 50f, 55f),
+                selectedUnitData.Description
+            );
+        }
         else
         {
             GUI.Label(
                 new Rect(panelX + 25f, panelY + 250f, panelWidth - 50f, 25f),
-                "未选中建筑"
+                "未选中对象"
             );
         }
 
@@ -523,6 +550,15 @@ public class GameBootstrap : MonoBehaviour
         }
 
         Vector2 mouseWorldPosition = GetMouseWorldPosition();
+
+        UnitData clickedUnit = FindUnitAt(mouseWorldPosition);
+
+        if (clickedUnit != null)
+        {
+            SelectUnit(clickedUnit);
+            return;
+        }
+
         BuildingData clickedBuilding = FindBuildingAt(mouseWorldPosition);
 
         if (clickedBuilding != null)
@@ -568,9 +604,26 @@ public class GameBootstrap : MonoBehaviour
         return null;
     }
 
+    private UnitData FindUnitAt(Vector2 worldPosition)
+    {
+        for (int i = units.Count - 1; i >= 0; i--)
+        {
+            UnitData unit = units[i];
+            float distance = Vector2.Distance(worldPosition, unit.Position);
+
+            if (distance <= unit.Radius + 0.2f)
+            {
+                return unit;
+            }
+        }
+
+        return null;
+    }
+
     private void SelectBuilding(BuildingData building)
     {
         selectedBuildingData = building;
+        selectedUnitData = null;
 
         if (selectionRingObject != null)
         {
@@ -587,16 +640,157 @@ public class GameBootstrap : MonoBehaviour
         Debug.Log($"Selected building: {building.DisplayName}");
     }
 
+    private void SelectUnit(UnitData unit)
+    {
+        selectedUnitData = unit;
+        selectedBuildingData = null;
+
+        if (selectionRingObject != null)
+        {
+            selectionRingObject.SetActive(true);
+            selectionRingObject.transform.position = new Vector3(
+                unit.Position.x,
+                unit.Position.y,
+                -0.15f
+            );
+
+            selectionRingObject.transform.localScale = Vector3.one * unit.Radius * 3.0f;
+        }
+
+        Debug.Log($"Selected unit: {unit.DisplayName}");
+    }
+
     private void ClearSelectedBuilding()
     {
         selectedBuildingData = null;
+        selectedUnitData = null;
 
         if (selectionRingObject != null)
         {
             selectionRingObject.SetActive(false);
         }
 
-        Debug.Log("Selected building cleared.");
+        Debug.Log("Selection cleared.");
+    }
+
+    private void HandleUnitMoveCommand()
+    {
+        if (selectedBuilding != BuildingType.None)
+        {
+            return;
+        }
+
+        if (selectedUnitData == null)
+        {
+            return;
+        }
+
+        if (!Input.GetMouseButtonDown(1))
+        {
+            return;
+        }
+
+        if (IsMouseOverRightPanel())
+        {
+            return;
+        }
+
+        Vector2 mouseWorldPosition = GetMouseWorldPosition();
+
+        if (!IsInsideMap(mouseWorldPosition))
+        {
+            Debug.LogWarning("Cannot move unit: target is outside the map.");
+            return;
+        }
+
+        Vector2Int targetCell = WorldToCell(mouseWorldPosition);
+
+        TryMoveSelectedUnitToCell(targetCell);
+    }
+
+    private void TryMoveSelectedUnitToCell(Vector2Int targetCell)
+    {
+        if (selectedUnitData == null)
+        {
+            return;
+        }
+
+        if (!IsCellInsideMap(targetCell))
+        {
+            Debug.LogWarning("Cannot move unit: target cell is outside the map.");
+            return;
+        }
+
+        if (targetCell == selectedUnitData.Cell)
+        {
+            Debug.Log("Unit is already at the target cell.");
+            return;
+        }
+
+        if (occupiedCells.Contains(targetCell))
+        {
+            Debug.LogWarning($"Cannot move unit: target cell {targetCell} is occupied.");
+            return;
+        }
+
+        occupiedCells.Remove(selectedUnitData.Cell);
+        occupiedCells.Add(targetCell);
+
+        selectedUnitData.Cell = targetCell;
+        selectedUnitData.TargetCell = targetCell;
+        selectedUnitData.TargetPosition = CellToWorld(targetCell);
+        selectedUnitData.IsMoving = true;
+
+        Debug.Log($"Move command: {selectedUnitData.DisplayName} -> cell {targetCell}");
+    }
+
+    private void UpdateUnitMovement()
+    {
+        foreach (UnitData unit in units)
+        {
+            if (!unit.IsMoving)
+            {
+                continue;
+            }
+
+            Vector2 currentPosition = unit.GameObject.transform.position;
+            Vector2 nextPosition = Vector2.MoveTowards(
+                currentPosition,
+                unit.TargetPosition,
+                unitMoveSpeed * Time.deltaTime
+            );
+
+            unit.GameObject.transform.position = new Vector3(
+                nextPosition.x,
+                nextPosition.y,
+                0f
+            );
+
+            unit.Position = nextPosition;
+
+            if (Vector2.Distance(nextPosition, unit.TargetPosition) < 0.01f)
+            {
+                unit.GameObject.transform.position = new Vector3(
+                    unit.TargetPosition.x,
+                    unit.TargetPosition.y,
+                    0f
+                );
+
+                unit.Position = unit.TargetPosition;
+                unit.IsMoving = false;
+
+                Debug.Log($"{unit.DisplayName} arrived at cell {unit.Cell}");
+            }
+
+            if (selectedUnitData == unit && selectionRingObject != null)
+            {
+                selectionRingObject.transform.position = new Vector3(
+                    unit.Position.x,
+                    unit.Position.y,
+                    -0.15f
+                );
+            }
+        }
     }
 
     private void HandlePlacementPreview()
@@ -739,7 +933,8 @@ public class GameBootstrap : MonoBehaviour
             infantryObject,
             spawnPosition,
             spawnCell,
-            infantryRadius
+            infantryRadius,
+            "步兵：基础作战单位。当前版本支持左键选中、右键移动。"
         );
 
         occupiedCells.Add(spawnCell);
