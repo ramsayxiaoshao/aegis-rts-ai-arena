@@ -46,6 +46,9 @@ public class GameBootstrap : MonoBehaviour
     [SerializeField] private int infantryAttackDamage = 20;
     [SerializeField] private float infantryAttackRange = 1.2f;
     [SerializeField] private float infantryAttackCooldown = 1f;
+    [SerializeField] private int playerInfantryHitPoints = 100;
+    [SerializeField] private int enemyInfantryHitPoints = 80;
+    [SerializeField] private float unitAggroRange = 4f;
 
     [Header("Enemy AI Settings")]
     [SerializeField] private float enemySpawnInterval = 15f;
@@ -115,6 +118,9 @@ public class GameBootstrap : MonoBehaviour
         public string Description;
         public Team Team;
 
+        public int MaxHitPoints;
+        public int HitPoints;
+
         public bool IsMoving;
         public Vector2 TargetPosition;
         public Vector2Int TargetCell;
@@ -123,7 +129,9 @@ public class GameBootstrap : MonoBehaviour
         public float AttackRange;
         public float AttackCooldown;
         public float AttackTimer;
+
         public BuildingData AttackTarget;
+        public UnitData AttackUnitTarget;
 
         public UnitData(
             string displayName,
@@ -134,6 +142,7 @@ public class GameBootstrap : MonoBehaviour
             float radius,
             string description,
             Team team,
+            int maxHitPoints,
             int attackDamage,
             float attackRange,
             float attackCooldown
@@ -148,6 +157,9 @@ public class GameBootstrap : MonoBehaviour
             Description = description;
             Team = team;
 
+            MaxHitPoints = maxHitPoints;
+            HitPoints = maxHitPoints;
+
             IsMoving = false;
             TargetPosition = position;
             TargetCell = cell;
@@ -156,7 +168,9 @@ public class GameBootstrap : MonoBehaviour
             AttackRange = attackRange;
             AttackCooldown = attackCooldown;
             AttackTimer = 0f;
+
             AttackTarget = null;
+            AttackUnitTarget = null;
         }
     }
 
@@ -357,14 +371,21 @@ public class GameBootstrap : MonoBehaviour
         {
             if (selectedUnits.Count == 1)
             {
+                UnitData selectedUnit = selectedUnits[0];
+
                 GUI.Label(
                     new Rect(panelX + 25f, panelY + 245f, panelWidth - 50f, 25f),
-                    "选中单位：" + selectedUnits[0].DisplayName
+                    "选中单位：" + selectedUnit.DisplayName
                 );
 
                 GUI.Label(
                     new Rect(panelX + 25f, panelY + 270f, panelWidth - 50f, 55f),
-                    selectedUnits[0].Description
+                    selectedUnit.Description
+                );
+
+                GUI.Label(
+                    new Rect(panelX + 25f, panelY + 315f, panelWidth - 50f, 25f),
+                    $"生命值：{selectedUnit.HitPoints}/{selectedUnit.MaxHitPoints}"
                 );
             }
             else
@@ -1082,6 +1103,14 @@ buildings.Add(enemyBaseData);
             return;
         }
 
+        UnitData targetUnit = FindUnitAt(mouseWorldPosition);
+
+        if (targetUnit != null && targetUnit.Team == Team.Enemy)
+        {
+            TryAttackSelectedUnits(targetUnit);
+            return;
+        }
+
         BuildingData targetBuilding = FindBuildingAt(mouseWorldPosition);
 
         if (targetBuilding != null && targetBuilding.Team == Team.Enemy)
@@ -1118,7 +1147,7 @@ buildings.Add(enemyBaseData);
     {
         if (targetBuilding == null || targetBuilding.Team != Team.Enemy)
         {
-            Debug.LogWarning("Cannot attack: invalid target.");
+            Debug.LogWarning("Cannot attack: invalid building target.");
             return;
         }
 
@@ -1132,11 +1161,38 @@ buildings.Add(enemyBaseData);
             }
 
             unit.AttackTarget = targetBuilding;
+            unit.AttackUnitTarget = null;
             unit.IsMoving = false;
             commandCount++;
         }
 
         Debug.Log($"Attack command: {commandCount} units -> {targetBuilding.DisplayName}");
+    }
+
+    private void TryAttackSelectedUnits(UnitData targetUnit)
+    {
+        if (targetUnit == null || targetUnit.Team != Team.Enemy)
+        {
+            Debug.LogWarning("Cannot attack: invalid unit target.");
+            return;
+        }
+
+        int commandCount = 0;
+
+        foreach (UnitData unit in selectedUnits)
+        {
+            if (unit == null || unit.Team != Team.Player)
+            {
+                continue;
+            }
+
+            unit.AttackUnitTarget = targetUnit;
+            unit.AttackTarget = null;
+            unit.IsMoving = false;
+            commandCount++;
+        }
+
+        Debug.Log($"Attack command: {commandCount} units -> {targetUnit.DisplayName}");
     }
 
     private void TryMoveSelectedUnitsToCell(Vector2Int centerCell)
@@ -1187,6 +1243,7 @@ buildings.Add(enemyBaseData);
             occupiedCells.Add(targetCell);
 
             unit.AttackTarget = null;
+            unit.AttackUnitTarget = null;
             unit.Cell = targetCell;
             unit.TargetCell = targetCell;
             unit.TargetPosition = CellToWorld(targetCell);
@@ -1276,6 +1333,7 @@ buildings.Add(enemyBaseData);
         }
 
         selectedUnitData.AttackTarget = null;
+        selectedUnitData.AttackUnitTarget = null;
         occupiedCells.Remove(selectedUnitData.Cell);
         occupiedCells.Add(targetCell);
 
@@ -1344,8 +1402,9 @@ buildings.Add(enemyBaseData);
             spawnPosition,
             spawnCell,
             infantryRadius,
-            "敌方步兵：由 AI 基地自动生产，会攻击玩家基地。",
+            "敌方步兵：由 AI 基地自动生产，会优先攻击附近玩家步兵，否则攻击玩家基地。",
             Team.Enemy,
+            enemyInfantryHitPoints,
             enemyInfantryAttackDamage,
             enemyInfantryAttackRange,
             enemyInfantryAttackCooldown
@@ -1361,68 +1420,215 @@ buildings.Add(enemyBaseData);
     
     private void UpdateUnitCombat()
     {
-        foreach (UnitData unit in units)
+        UnitData[] unitsSnapshot = units.ToArray();
+
+        foreach (UnitData unit in unitsSnapshot)
         {
-            if (unit.AttackTarget == null)
+            if (unit == null || !units.Contains(unit))
             {
                 continue;
             }
 
-            BuildingData target = unit.AttackTarget;
+            TryAutoAcquireUnitTarget(unit);
 
-            if (!buildings.Contains(target))
+            if (unit.AttackUnitTarget != null)
             {
-                unit.AttackTarget = null;
+                UpdateUnitAttackUnit(unit);
                 continue;
             }
 
-            float distance = Vector2.Distance(unit.Position, target.Position);
-
-            if (distance > unit.AttackRange)
+            if (unit.AttackTarget != null)
             {
-                Vector2 nextPosition = Vector2.MoveTowards(
-                    unit.Position,
-                    target.Position,
-                    unitMoveSpeed * Time.deltaTime
-                );
+                UpdateUnitAttackBuilding(unit);
+                continue;
+            }
+        }
+    }
 
-                unit.GameObject.transform.position = new Vector3(
-                    nextPosition.x,
-                    nextPosition.y,
-                    0f
-                );
+    private void TryAutoAcquireUnitTarget(UnitData unit)
+    {
+        if (unit == null)
+        {
+            return;
+        }
 
-                unit.Position = nextPosition;
+        UnitData nearestEnemyUnit = FindNearestEnemyUnitInRange(unit, unitAggroRange);
 
-                if (selectedUnitData == unit && selectionRingObject != null)
-                {
-                    selectionRingObject.transform.position = new Vector3(
-                        unit.Position.x,
-                        unit.Position.y,
-                        -0.15f
-                    );
-                }
+        if (nearestEnemyUnit == null)
+        {
+            return;
+        }
 
+        unit.AttackUnitTarget = nearestEnemyUnit;
+        unit.AttackTarget = null;
+        unit.IsMoving = false;
+    }
+
+    private UnitData FindNearestEnemyUnitInRange(UnitData sourceUnit, float range)
+    {
+        UnitData nearestUnit = null;
+        float nearestDistance = float.MaxValue;
+
+        foreach (UnitData candidate in units)
+        {
+            if (candidate == null)
+            {
                 continue;
             }
 
-            unit.AttackTimer -= Time.deltaTime;
-
-            if (unit.AttackTimer > 0f)
+            if (candidate.Team == sourceUnit.Team)
             {
                 continue;
             }
 
-            unit.AttackTimer = unit.AttackCooldown;
-            target.HitPoints -= unit.AttackDamage;
+            float distance = Vector2.Distance(sourceUnit.Position, candidate.Position);
 
-            Debug.Log($"{unit.DisplayName} attacked {target.DisplayName}. HP: {target.HitPoints}/{target.MaxHitPoints}");
-
-            if (target.HitPoints <= 0)
+            if (distance > range)
             {
-                DestroyBuilding(target);
-                unit.AttackTarget = null;
+                continue;
             }
+
+            if (distance < nearestDistance)
+            {
+                nearestDistance = distance;
+                nearestUnit = candidate;
+            }
+        }
+
+        return nearestUnit;
+    }
+
+    private void UpdateUnitAttackUnit(UnitData attacker)
+    {
+        UnitData target = attacker.AttackUnitTarget;
+
+        if (target == null || !units.Contains(target))
+        {
+            attacker.AttackUnitTarget = null;
+            return;
+        }
+
+        float distance = Vector2.Distance(attacker.Position, target.Position);
+
+        if (distance > attacker.AttackRange)
+        {
+            MoveUnitTowards(attacker, target.Position);
+            return;
+        }
+
+        attacker.AttackTimer -= Time.deltaTime;
+
+        if (attacker.AttackTimer > 0f)
+        {
+            return;
+        }
+
+        attacker.AttackTimer = attacker.AttackCooldown;
+        target.HitPoints -= attacker.AttackDamage;
+
+        Debug.Log($"{attacker.DisplayName} attacked {target.DisplayName}. HP: {target.HitPoints}/{target.MaxHitPoints}");
+
+        if (target.HitPoints <= 0)
+        {
+            DestroyUnit(target);
+            attacker.AttackUnitTarget = null;
+        }
+    }
+
+    private void UpdateUnitAttackBuilding(UnitData attacker)
+    {
+        BuildingData target = attacker.AttackTarget;
+
+        if (target == null || !buildings.Contains(target))
+        {
+            attacker.AttackTarget = null;
+            return;
+        }
+
+        float distance = Vector2.Distance(attacker.Position, target.Position);
+
+        if (distance > attacker.AttackRange)
+        {
+            MoveUnitTowards(attacker, target.Position);
+            return;
+        }
+
+        attacker.AttackTimer -= Time.deltaTime;
+
+        if (attacker.AttackTimer > 0f)
+        {
+            return;
+        }
+
+        attacker.AttackTimer = attacker.AttackCooldown;
+        target.HitPoints -= attacker.AttackDamage;
+
+        Debug.Log($"{attacker.DisplayName} attacked {target.DisplayName}. HP: {target.HitPoints}/{target.MaxHitPoints}");
+
+        if (target.HitPoints <= 0)
+        {
+            DestroyBuilding(target);
+            attacker.AttackTarget = null;
+        }
+    }
+
+    private void MoveUnitTowards(UnitData unit, Vector2 targetPosition)
+    {
+        Vector2 nextPosition = Vector2.MoveTowards(
+            unit.Position,
+            targetPosition,
+            unitMoveSpeed * Time.deltaTime
+        );
+
+        unit.GameObject.transform.position = new Vector3(
+            nextPosition.x,
+            nextPosition.y,
+            0f
+        );
+
+        unit.Position = nextPosition;
+    }
+
+    private void DestroyUnit(UnitData unit)
+    {
+        if (unit == null)
+        {
+            return;
+        }
+
+        Debug.Log($"{unit.DisplayName} destroyed.");
+
+        units.Remove(unit);
+        occupiedCells.Remove(unit.Cell);
+
+        if (selectedUnitData == unit)
+        {
+            selectedUnitData = null;
+        }
+
+        selectedUnits.Remove(unit);
+
+        if (unitSelectionRings.TryGetValue(unit, out GameObject ringObject))
+        {
+            if (ringObject != null)
+            {
+                Destroy(ringObject);
+            }
+
+            unitSelectionRings.Remove(unit);
+        }
+
+        foreach (UnitData otherUnit in units)
+        {
+            if (otherUnit.AttackUnitTarget == unit)
+            {
+                otherUnit.AttackUnitTarget = null;
+            }
+        }
+
+        if (unit.GameObject != null)
+        {
+            Destroy(unit.GameObject);
         }
     }
 
@@ -1464,7 +1670,7 @@ buildings.Add(enemyBaseData);
     {
         foreach (UnitData unit in units)
         {
-            if (unit.AttackTarget != null)
+            if (unit.AttackTarget != null || unit.AttackUnitTarget != null)
             {
                 continue;
             }
@@ -1657,8 +1863,9 @@ buildings.Add(enemyBaseData);
             spawnPosition,
             spawnCell,
             infantryRadius,
-            "步兵：基础作战单位。当前版本支持左键选中、右键移动和攻击敌方建筑。",
+            "步兵：基础作战单位。当前版本支持左键选中、右键移动、攻击敌方建筑和敌方单位。",
             Team.Player,
+            playerInfantryHitPoints,
             infantryAttackDamage,
             infantryAttackRange,
             infantryAttackCooldown
