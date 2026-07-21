@@ -46,7 +46,6 @@ public class GameBootstrap : MonoBehaviour
 
     [Header("Unit Settings")]
     [SerializeField] private float infantryRadius = 0.42f;
-    [SerializeField] private float unitMoveSpeed = 5f;
 
     [Header("Camera Settings")]
     [SerializeField] private float cameraMoveSpeed = 14f;
@@ -57,6 +56,9 @@ public class GameBootstrap : MonoBehaviour
     [SerializeField] private float dragSelectThreshold = 10f;
 
     private RtsEconomyProductionSystem economy;
+    private GridMapService gridMap;
+    private BuildingPlacementSystem placement;
+    private UnitMovementSystem movement;
     private ArenaOrchestrator arena;
     private RtsEntityLifecycle lifecycle;
     private RtsCombatSystem combat;
@@ -107,8 +109,6 @@ public class GameBootstrap : MonoBehaviour
     private readonly List<UnitData> selectedUnits = new List<UnitData>();
     private readonly Dictionary<UnitData, GameObject> unitSelectionRings = new Dictionary<UnitData, GameObject>();
 
-    private readonly HashSet<Vector2Int> occupiedCells = new HashSet<Vector2Int>();
-
     private void Awake()
     {
         gameConfig = gameConfig != null
@@ -117,6 +117,9 @@ public class GameBootstrap : MonoBehaviour
 
         ApplyGameConfig();
         economy = new RtsEconomyProductionSystem(gameConfig);
+        gridMap = new GridMapService(mapSize, cellSize);
+        placement = new BuildingPlacementSystem(gameConfig, economy, gridMap);
+        movement = new UnitMovementSystem(gameConfig, gridMap, units);
         arena = new ArenaOrchestrator(
             gameConfig,
             economy,
@@ -135,7 +138,7 @@ public class GameBootstrap : MonoBehaviour
         lifecycle = new RtsEntityLifecycle(
             buildings,
             units,
-            occupiedCells,
+            gridMap.OccupiedCells,
             OnUnitRemoved,
             OnBuildingRemoved
         );
@@ -205,7 +208,6 @@ public class GameBootstrap : MonoBehaviour
         passiveResourceIncome = gameConfig.PassiveResourceIncome;
         passiveResourceInterval = gameConfig.PassiveResourceInterval;
         infantryRadius = gameConfig.InfantryRadius;
-        unitMoveSpeed = gameConfig.UnitMoveSpeed;
         cameraMoveSpeed = gameConfig.CameraMoveSpeed;
         cameraZoomSpeed = gameConfig.CameraZoomSpeed;
         minCameraSize = gameConfig.MinCameraSize;
@@ -250,7 +252,7 @@ public class GameBootstrap : MonoBehaviour
         HandlePlacementConfirm();
         UpdateEnemyAI();
         combat.Tick(Time.deltaTime);
-        UpdateUnitMovement();
+        movement.Tick(Time.deltaTime);
         UpdateSelectionRingPositions();
     }
 
@@ -347,7 +349,7 @@ public class GameBootstrap : MonoBehaviour
         buildings.Clear();
         units.Clear();
         selectedUnits.Clear();
-        occupiedCells.Clear();
+        gridMap.Clear();
         selectedBuildingData = null;
         selectedUnitData = null;
         playerBaseData = null;
@@ -362,7 +364,7 @@ public class GameBootstrap : MonoBehaviour
 
     private void CreateGrid()
     {
-        float half = GetMapHalfSize();
+        float half = gridMap.HalfSize;
 
         Material lineMaterial = new Material(Shader.Find("Sprites/Default"));
 
@@ -405,15 +407,15 @@ public class GameBootstrap : MonoBehaviour
 
     private void CreateBase()
     {
-        float half = GetMapHalfSize();
+        float half = gridMap.HalfSize;
 
         basePosition = new Vector2(
             half - cellSize * 2.5f,
             half - cellSize * 2.5f
         );
 
-        Vector2Int baseCell = WorldToCell(basePosition);
-        occupiedCells.Add(baseCell);
+        Vector2Int baseCell = gridMap.WorldToCell(basePosition);
+        gridMap.TryOccupy(baseCell);
 
         baseObject = CreateCircleObject(
             "Base",
@@ -446,15 +448,15 @@ public class GameBootstrap : MonoBehaviour
 
     private void CreateEnemyBase()
     {
-        float half = GetMapHalfSize();
+        float half = gridMap.HalfSize;
 
         Vector2 enemyBasePosition = new Vector2(
             -half + cellSize * 2.5f,
             -half + cellSize * 2.5f
         );
 
-        Vector2Int enemyBaseCell = WorldToCell(enemyBasePosition);
-        occupiedCells.Add(enemyBaseCell);
+        Vector2Int enemyBaseCell = gridMap.WorldToCell(enemyBasePosition);
+        gridMap.TryOccupy(enemyBaseCell);
 
         GameObject enemyBaseObject = CreateCircleObject(
             "EnemyBase",
@@ -529,7 +531,7 @@ public class GameBootstrap : MonoBehaviour
 
     private void SelectFactory()
     {
-        if (!CanAffordBuilding(BuildingType.Factory))
+        if (!placement.CanAfford(BuildingType.Factory))
         {
             Debug.LogWarning($"Cannot select Factory: not enough resources. Need {factoryCost}, have {economy.Resources}.");
             return;
@@ -814,7 +816,7 @@ public class GameBootstrap : MonoBehaviour
 
         Vector2 mouseWorldPosition = GetMouseWorldPosition();
 
-        if (!IsInsideMap(mouseWorldPosition))
+        if (!gridMap.IsWorldInside(mouseWorldPosition))
         {
             Debug.LogWarning("Cannot command units: target is outside the map.");
             return;
@@ -836,7 +838,7 @@ public class GameBootstrap : MonoBehaviour
             return;
         }
 
-        Vector2Int targetCell = WorldToCell(mouseWorldPosition);
+        Vector2Int targetCell = gridMap.WorldToCell(mouseWorldPosition);
 
         TryMoveSelectedUnitsToCell(targetCell);
     }
@@ -897,145 +899,17 @@ public class GameBootstrap : MonoBehaviour
 
     private void TryMoveSelectedUnitsToCell(Vector2Int centerCell)
     {
-        List<UnitData> movableUnits = new List<UnitData>();
-        HashSet<Vector2Int> selectedCurrentCells = new HashSet<Vector2Int>();
+        int moveCount = movement.CommandGroupMove(selectedUnits, centerCell);
 
-        foreach (UnitData unit in selectedUnits)
-        {
-            if (unit == null || unit.Team != Team.Player)
-            {
-                continue;
-            }
-
-            movableUnits.Add(unit);
-            selectedCurrentCells.Add(unit.Cell);
-        }
-
-        if (movableUnits.Count == 0)
-        {
-            return;
-        }
-
-        List<Vector2Int> targetCells = FindGroupTargetCells(
-            centerCell,
-            movableUnits.Count,
-            selectedCurrentCells
-        );
-
-        if (targetCells.Count == 0)
+        if (moveCount == 0)
         {
             Debug.LogWarning("Cannot move units: no valid target cells.");
             return;
         }
 
-        HashSet<Vector2Int> pathBlockedCells = new HashSet<Vector2Int>(occupiedCells);
-
-        foreach (Vector2Int selectedCell in selectedCurrentCells)
-        {
-            pathBlockedCells.Remove(selectedCell);
-        }
-
-        foreach (UnitData unit in movableUnits)
-        {
-            occupiedCells.Remove(unit.Cell);
-        }
-
-        int moveCount = Mathf.Min(movableUnits.Count, targetCells.Count);
-
-        for (int i = 0; i < moveCount; i++)
-        {
-            UnitData unit = movableUnits[i];
-            Vector2Int targetCell = targetCells[i];
-            List<Vector2Int> path = GridPathfinder.FindPath(
-                unit.Cell,
-                targetCell,
-                mapSize,
-                mapSize,
-                pathBlockedCells
-            );
-
-            if (path.Count == 0)
-            {
-                occupiedCells.Add(unit.Cell);
-                unit.IsMoving = false;
-                continue;
-            }
-
-            occupiedCells.Add(targetCell);
-
-            unit.AttackTarget = null;
-            unit.AttackUnitTarget = null;
-            unit.Cell = targetCell;
-            unit.TargetCell = targetCell;
-            unit.TargetPosition = CellToWorld(targetCell);
-            unit.Waypoints.Clear();
-
-            for (int pathIndex = 1; pathIndex < path.Count; pathIndex++)
-            {
-                unit.Waypoints.Add(CellToWorld(path[pathIndex]));
-            }
-
-            unit.IsMoving = true;
-            pathBlockedCells.Add(targetCell);
-        }
-
         Debug.Log($"Move command: {moveCount} units -> around cell {centerCell}");
     }
 
-    private List<Vector2Int> FindGroupTargetCells(
-        Vector2Int centerCell,
-        int requiredCount,
-        HashSet<Vector2Int> selectedCurrentCells
-    )
-    {
-        List<Vector2Int> result = new List<Vector2Int>();
-        HashSet<Vector2Int> reservedCells = new HashSet<Vector2Int>();
-
-        int maxSearchRadius = 6;
-
-        for (int radius = 0; radius <= maxSearchRadius; radius++)
-        {
-            for (int dx = -radius; dx <= radius; dx++)
-            {
-                for (int dy = -radius; dy <= radius; dy++)
-                {
-                    Vector2Int candidateCell = new Vector2Int(
-                        centerCell.x + dx,
-                        centerCell.y + dy
-                    );
-
-                    if (!IsCellInsideMap(candidateCell))
-                    {
-                        continue;
-                    }
-
-                    if (reservedCells.Contains(candidateCell))
-                    {
-                        continue;
-                    }
-
-                    bool occupiedByNonSelectedUnitOrBuilding =
-                        occupiedCells.Contains(candidateCell) &&
-                        !selectedCurrentCells.Contains(candidateCell);
-
-                    if (occupiedByNonSelectedUnitOrBuilding)
-                    {
-                        continue;
-                    }
-
-                    result.Add(candidateCell);
-                    reservedCells.Add(candidateCell);
-
-                    if (result.Count >= requiredCount)
-                    {
-                        return result;
-                    }
-                }
-            }
-        }
-
-        return result;
-    }
     private void UpdateEnemyAI()
     {
         if (enemyBaseData == null || !buildings.Contains(enemyBaseData))
@@ -1067,13 +941,13 @@ public class GameBootstrap : MonoBehaviour
             return;
         }
 
-        if (!TryGetSpawnCellNear(enemyBaseData.Cell, out Vector2Int spawnCell))
+        if (!gridMap.TryFindOpenCellNear(enemyBaseData.Cell, out Vector2Int spawnCell))
         {
             Debug.LogWarning("Enemy AI cannot spawn infantry: no valid spawn cell.");
             return;
         }
 
-        Vector2 spawnPosition = CellToWorld(spawnCell);
+        Vector2 spawnPosition = gridMap.CellToWorld(spawnCell);
 
         GameObject enemyInfantryObject = CreateCircleObject(
             "EnemyInfantry",
@@ -1103,7 +977,7 @@ public class GameBootstrap : MonoBehaviour
 
         enemyInfantry.AttackTarget = playerBaseData;
 
-        occupiedCells.Add(spawnCell);
+        gridMap.TryOccupy(spawnCell);
         enemyInfantry.Id = nextEntityId++;
         units.Add(enemyInfantry);
 
@@ -1112,35 +986,7 @@ public class GameBootstrap : MonoBehaviour
     
     private void MoveUnitTowards(UnitData unit, Vector2 targetPosition)
     {
-        Vector2 nextPosition = Vector2.MoveTowards(
-            unit.Position,
-            targetPosition,
-            unitMoveSpeed * Time.deltaTime
-        );
-
-        unit.GameObject.transform.position = new Vector3(
-            nextPosition.x,
-            nextPosition.y,
-            0f
-        );
-
-        unit.Position = nextPosition;
-        SyncCombatMovementCell(unit);
-    }
-
-    private void SyncCombatMovementCell(UnitData unit)
-    {
-        Vector2Int currentCell = WorldToCell(unit.Position);
-
-        if (currentCell == unit.Cell)
-        {
-            return;
-        }
-
-        occupiedCells.Remove(unit.Cell);
-        unit.Cell = currentCell;
-        unit.TargetCell = currentCell;
-        occupiedCells.Add(currentCell);
+        movement.MoveTowards(unit, targetPosition, Time.deltaTime);
     }
 
     private void LateUpdate()
@@ -1224,72 +1070,6 @@ public class GameBootstrap : MonoBehaviour
             Debug.Log("Defeat! Player base destroyed.");
         }
     }
-    private void UpdateUnitMovement()
-    {
-        foreach (UnitData unit in units)
-        {
-            if (unit.AttackTarget != null || unit.AttackUnitTarget != null)
-            {
-                continue;
-            }
-
-            if (!unit.IsMoving)
-            {
-                continue;
-            }
-
-            Vector2 currentPosition = unit.GameObject.transform.position;
-            Vector2 movementTarget = unit.Waypoints.Count > 0
-                ? unit.Waypoints[0]
-                : unit.TargetPosition;
-            Vector2 nextPosition = Vector2.MoveTowards(
-                currentPosition,
-                movementTarget,
-                unitMoveSpeed * Time.deltaTime
-            );
-
-            unit.GameObject.transform.position = new Vector3(
-                nextPosition.x,
-                nextPosition.y,
-                0f
-            );
-
-            unit.Position = nextPosition;
-
-            if (Vector2.Distance(nextPosition, movementTarget) < 0.01f)
-            {
-                unit.GameObject.transform.position = new Vector3(
-                    movementTarget.x,
-                    movementTarget.y,
-                    0f
-                );
-
-                unit.Position = movementTarget;
-
-                if (unit.Waypoints.Count > 0)
-                {
-                    unit.Waypoints.RemoveAt(0);
-                }
-
-                unit.IsMoving = unit.Waypoints.Count > 0;
-
-                if (!unit.IsMoving)
-                {
-                    Debug.Log($"{unit.DisplayName} arrived at cell {unit.Cell}");
-                }
-            }
-
-            if (selectedUnitData == unit && selectionRingObject != null)
-            {
-                selectionRingObject.transform.position = new Vector3(
-                    unit.Position.x,
-                    unit.Position.y,
-                    -0.15f
-                );
-            }
-        }
-    }
-
     private void HandlePlacementPreview()
     {
         if (selectedBuilding == BuildingType.None)
@@ -1299,15 +1079,15 @@ public class GameBootstrap : MonoBehaviour
 
         Vector2 mouseWorldPosition = GetMouseWorldPosition();
 
-        if (!IsInsideMap(mouseWorldPosition))
+        if (!gridMap.IsWorldInside(mouseWorldPosition))
         {
             hasPreviewCell = false;
             SetPlacementPreviewVisible(false);
             return;
         }
 
-        currentPreviewCell = WorldToCell(mouseWorldPosition);
-        currentPreviewPosition = CellToWorld(currentPreviewCell);
+        currentPreviewCell = gridMap.WorldToCell(mouseWorldPosition);
+        currentPreviewPosition = gridMap.CellToWorld(currentPreviewCell);
         hasPreviewCell = true;
 
         SetPlacementPreviewVisible(true);
@@ -1318,7 +1098,12 @@ public class GameBootstrap : MonoBehaviour
             -0.2f
         );
 
-        bool canBuild = CanBuildAt(currentPreviewPosition, currentPreviewCell);
+        bool canBuild = placement.CanPlace(
+            selectedBuilding,
+            basePosition,
+            currentPreviewPosition,
+            currentPreviewCell
+        );
         SetPlacementPreviewColor(canBuild);
     }
 
@@ -1340,13 +1125,18 @@ public class GameBootstrap : MonoBehaviour
             return;
         }
 
-        bool canBuild = CanBuildAt(currentPreviewPosition, currentPreviewCell);
+        bool canBuild = placement.CanPlace(
+            selectedBuilding,
+            basePosition,
+            currentPreviewPosition,
+            currentPreviewCell
+        );
 
         if (!canBuild)
         {
-            if (!CanAffordBuilding(selectedBuilding))
+            if (!placement.CanAfford(selectedBuilding))
             {
-                Debug.LogWarning($"Cannot build: not enough resources. Need {GetBuildingCost(selectedBuilding)}, have {economy.Resources}.");
+                Debug.LogWarning($"Cannot build: not enough resources. Need {placement.GetCost(selectedBuilding)}, have {economy.Resources}.");
             }
             else
             {
@@ -1359,9 +1149,12 @@ public class GameBootstrap : MonoBehaviour
         BuildFactory(currentPreviewPosition, currentPreviewCell);
     }
 
-    private void BuildFactory(Vector2 position, Vector2Int cell)
+    private bool BuildFactory(Vector2 position, Vector2Int cell)
     {
-        economy.TrySpend(factoryCost);
+        if (!placement.TryReserve(BuildingType.Factory, basePosition, position, cell))
+        {
+            return false;
+        }
 
         GameObject factoryObject = CreateCircleObject(
             "Factory",
@@ -1388,9 +1181,8 @@ public class GameBootstrap : MonoBehaviour
         factory.Id = nextEntityId++;
         buildings.Add(factory);
         
-        occupiedCells.Add(cell);
-
         Debug.Log($"Factory built at cell {cell}. Remaining resources: {economy.Resources}");
+        return true;
     }
 
     private bool TryTrainInfantry(BuildingData factory)
@@ -1400,7 +1192,7 @@ public class GameBootstrap : MonoBehaviour
 
     private bool TrySpawnPlayerInfantry(BuildingData factory)
     {
-        if (!TryGetSpawnCellNear(factory.Cell, out Vector2Int spawnCell))
+        if (!gridMap.TryFindOpenCellNear(factory.Cell, out Vector2Int spawnCell))
         {
             return false;
         }
@@ -1411,7 +1203,7 @@ public class GameBootstrap : MonoBehaviour
 
     private void SpawnPlayerInfantry(Vector2Int spawnCell)
     {
-        Vector2 spawnPosition = CellToWorld(spawnCell);
+        Vector2 spawnPosition = gridMap.CellToWorld(spawnCell);
 
         GameObject infantryObject = CreateCircleObject(
             "Infantry",
@@ -1439,101 +1231,11 @@ public class GameBootstrap : MonoBehaviour
             infantryAttackCooldown
         );
 
-        occupiedCells.Add(spawnCell);
+        gridMap.TryOccupy(spawnCell);
         infantry.Id = nextEntityId++;
         units.Add(infantry);
 
         Debug.Log($"Infantry trained at cell {spawnCell}.");
-    }
-
-    private bool TryGetSpawnCellNear(Vector2Int originCell, out Vector2Int spawnCell)
-    {
-        Vector2Int[] offsets =
-        {
-            new Vector2Int(0, -1),
-            new Vector2Int(-1, 0),
-            new Vector2Int(1, 0),
-            new Vector2Int(0, 1),
-            new Vector2Int(-1, -1),
-            new Vector2Int(1, -1),
-            new Vector2Int(-1, 1),
-            new Vector2Int(1, 1),
-            new Vector2Int(0, -2),
-            new Vector2Int(-2, 0),
-            new Vector2Int(2, 0),
-            new Vector2Int(0, 2)
-        };
-
-        foreach (Vector2Int offset in offsets)
-        {
-            Vector2Int candidateCell = originCell + offset;
-
-            if (!IsCellInsideMap(candidateCell))
-            {
-                continue;
-            }
-
-            if (occupiedCells.Contains(candidateCell))
-            {
-                continue;
-            }
-
-            spawnCell = candidateCell;
-            return true;
-        }
-
-        spawnCell = originCell;
-        return false;
-    }
-
-    private bool IsCellInsideMap(Vector2Int cell)
-    {
-        return cell.x >= 0 &&
-            cell.x < mapSize &&
-            cell.y >= 0 &&
-            cell.y < mapSize;
-    }
-
-    private int GetBuildingCost(BuildingType buildingType)
-    {
-        if (buildingType == BuildingType.Factory)
-        {
-            return factoryCost;
-        }
-
-        return 0;
-    }
-
-    private bool CanAffordBuilding(BuildingType buildingType)
-    {
-        return economy.CanAfford(GetBuildingCost(buildingType));
-    }
-
-    private bool CanBuildAt(Vector2 worldPosition, Vector2Int cell)
-    {
-        if (!IsInsideMap(worldPosition))
-        {
-            return false;
-        }
-
-        if (!CanAffordBuilding(selectedBuilding))
-        {
-            return false;
-        }
-
-        float distanceToBase = Vector2.Distance(basePosition, worldPosition);
-
-        if (distanceToBase > buildRadius)
-        {
-            return false;
-        }
-
-        if (occupiedCells.Contains(cell))
-        {
-            return false;
-        }
-
-        return true;
     }
 
     private Vector2 GetMouseWorldPosition()
@@ -1541,44 +1243,6 @@ public class GameBootstrap : MonoBehaviour
         Vector3 mousePosition = Input.mousePosition;
         Vector3 worldPosition = mainCamera.ScreenToWorldPoint(mousePosition);
         return new Vector2(worldPosition.x, worldPosition.y);
-    }
-
-    private bool IsInsideMap(Vector2 worldPosition)
-    {
-        float half = GetMapHalfSize();
-
-        return worldPosition.x >= -half &&
-               worldPosition.x <= half &&
-               worldPosition.y >= -half &&
-               worldPosition.y <= half;
-    }
-
-    private Vector2Int WorldToCell(Vector2 worldPosition)
-    {
-        float half = GetMapHalfSize();
-
-        int x = Mathf.FloorToInt((worldPosition.x + half) / cellSize);
-        int y = Mathf.FloorToInt((worldPosition.y + half) / cellSize);
-
-        x = Mathf.Clamp(x, 0, mapSize - 1);
-        y = Mathf.Clamp(y, 0, mapSize - 1);
-
-        return new Vector2Int(x, y);
-    }
-
-    private Vector2 CellToWorld(Vector2Int cell)
-    {
-        float half = GetMapHalfSize();
-
-        float x = -half + cell.x * cellSize + cellSize / 2f;
-        float y = -half + cell.y * cellSize + cellSize / 2f;
-
-        return new Vector2(x, y);
-    }
-
-    private float GetMapHalfSize()
-    {
-        return mapSize * cellSize / 2f;
     }
 
     private GameObject CreateCircleObject(
@@ -1702,19 +1366,7 @@ public class GameBootstrap : MonoBehaviour
 
     private bool TryBuildFactoryAtCell(Vector2Int cell)
     {
-        Vector2 position = CellToWorld(cell);
-        BuildingType previousSelection = selectedBuilding;
-        selectedBuilding = BuildingType.Factory;
-        bool canBuild = IsCellInsideMap(cell) && CanBuildAt(position, cell);
-        selectedBuilding = previousSelection;
-
-        if (!canBuild)
-        {
-            return false;
-        }
-
-        BuildFactory(position, cell);
-        return true;
+        return BuildFactory(gridMap.CellToWorld(cell), cell);
     }
 
 }

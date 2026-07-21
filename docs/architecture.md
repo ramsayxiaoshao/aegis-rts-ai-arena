@@ -5,6 +5,9 @@ The prototype runtime is being split incrementally so gameplay stays playable du
 ## Current components
 
 - `GameBootstrap` coordinates match state, world creation, scene objects, and the extracted runtime systems.
+- `GridMapService` owns map bounds, coordinate conversion, occupied cells, and nearby open-cell lookup.
+- `BuildingPlacementSystem` validates and atomically reserves paid building placements.
+- `UnitMovementSystem` owns formation-cell assignment, path requests, movement updates, and combat pursuit movement.
 - `GameDomain` owns shared team, entity-type, building, and unit runtime models.
 - `RtsCameraController` owns camera setup, movement, zoom, and map bounds.
 - `RtsGameConfig` is the ScriptableObject source for map, economy, combat, production, AI, movement, and camera balance values.
@@ -24,9 +27,7 @@ The default balance asset is `Assets/_Project/Resources/RtsGameConfig.asset`. `G
 
 The remaining responsibilities should leave `GameBootstrap` in this order:
 
-1. building placement and world-coordinate helpers;
-2. unit movement and formation reservation;
-3. enemy spawning and strategy;
-4. runtime entity presentation and prefab creation.
+1. enemy spawning and strategy;
+2. runtime entity presentation and prefab creation.
 
 Each extraction should retain the existing Arena contract and add Edit Mode or Play Mode coverage before behavior changes are introduced.
