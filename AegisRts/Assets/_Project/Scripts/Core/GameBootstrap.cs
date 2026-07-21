@@ -3,29 +3,7 @@ using UnityEngine;
 
 public class GameBootstrap : MonoBehaviour
 {
-    private enum GameState
-    {
-        MainMenu,
-        Playing
-    }
-
-    private enum BuildingType
-    {
-        None,
-        Base,
-        Factory
-    }
-
-    private enum UnitType
-    {
-        Infantry
-    }
-
-    private enum Team
-    {
-        Player,
-        Enemy
-    }
+    [SerializeField] private RtsGameConfig gameConfig;
 
     [Header("Map Settings")]
     [SerializeField] private int mapSize = 32;
@@ -84,122 +62,11 @@ public class GameBootstrap : MonoBehaviour
     private int nextEntityId = 1;
     private float matchTime;
 
-    private class BuildingData
-    {
-        public int Id;
-        public string DisplayName;
-        public BuildingType Type;
-        public GameObject GameObject;
-        public Vector2 Position;
-        public Vector2Int Cell;
-        public float Radius;
-        public string Description;
-        public Team Team;
-        public int MaxHitPoints;
-        public int HitPoints;
-        public int InfantryQueue;
-        public float ProductionTimer;
-
-        public BuildingData(
-            string displayName,
-            BuildingType type,
-            GameObject gameObject,
-            Vector2 position,
-            Vector2Int cell,
-            float radius,
-            string description,
-            Team team,
-            int maxHitPoints
-        )
-        {
-            DisplayName = displayName;
-            Type = type;
-            GameObject = gameObject;
-            Position = position;
-            Cell = cell;
-            Radius = radius;
-            Description = description;
-            Team = team;
-            MaxHitPoints = maxHitPoints;
-            HitPoints = maxHitPoints;
-            InfantryQueue = 0;
-            ProductionTimer = 0f;
-        }
-    }
-
-    private class UnitData
-    {
-        public int Id;
-        public string DisplayName;
-        public UnitType Type;
-        public GameObject GameObject;
-        public Vector2 Position;
-        public Vector2Int Cell;
-        public float Radius;
-        public string Description;
-        public Team Team;
-
-        public int MaxHitPoints;
-        public int HitPoints;
-
-        public bool IsMoving;
-        public Vector2 TargetPosition;
-        public Vector2Int TargetCell;
-        public readonly List<Vector2> Waypoints = new List<Vector2>();
-
-        public int AttackDamage;
-        public float AttackRange;
-        public float AttackCooldown;
-        public float AttackTimer;
-
-        public BuildingData AttackTarget;
-        public UnitData AttackUnitTarget;
-
-        public UnitData(
-            string displayName,
-            UnitType type,
-            GameObject gameObject,
-            Vector2 position,
-            Vector2Int cell,
-            float radius,
-            string description,
-            Team team,
-            int maxHitPoints,
-            int attackDamage,
-            float attackRange,
-            float attackCooldown
-        )
-        {
-            DisplayName = displayName;
-            Type = type;
-            GameObject = gameObject;
-            Position = position;
-            Cell = cell;
-            Radius = radius;
-            Description = description;
-            Team = team;
-
-            MaxHitPoints = maxHitPoints;
-            HitPoints = maxHitPoints;
-
-            IsMoving = false;
-            TargetPosition = position;
-            TargetCell = cell;
-
-            AttackDamage = attackDamage;
-            AttackRange = attackRange;
-            AttackCooldown = attackCooldown;
-            AttackTimer = 0f;
-
-            AttackTarget = null;
-            AttackUnitTarget = null;
-        }
-    }
-
     private GameState gameState = GameState.MainMenu;
     private BuildingType selectedBuilding = BuildingType.None;
 
     private Camera mainCamera;
+    private RtsCameraController cameraController;
 
     private Transform gridRoot;
     private Transform buildingRoot;
@@ -246,12 +113,73 @@ public class GameBootstrap : MonoBehaviour
 
     private void Awake()
     {
+        gameConfig = gameConfig != null
+            ? gameConfig
+            : Resources.Load<RtsGameConfig>("RtsGameConfig");
+
+        ApplyGameConfig();
         mainCamera = Camera.main;
+        cameraController = gameObject.AddComponent<RtsCameraController>();
 
         circleSprite = CreateCircleSprite(128);
         menuBackgroundTexture = CreateMenuBackgroundTexture();
 
-        SetupCamera();
+        cameraController.Configure(
+            mainCamera,
+            mapSize * cellSize,
+            cameraMoveSpeed,
+            cameraZoomSpeed,
+            minCameraSize,
+            maxCameraSize
+        );
+    }
+
+    private void ApplyGameConfig()
+    {
+        if (gameConfig == null)
+        {
+            Debug.LogWarning("RtsGameConfig was not found; using scene defaults.");
+            return;
+        }
+
+        if (!gameConfig.IsValid())
+        {
+            Debug.LogError("RtsGameConfig contains invalid values.");
+            return;
+        }
+
+        mapSize = gameConfig.MapSize;
+        cellSize = gameConfig.CellSize;
+        baseRadius = gameConfig.BaseRadius;
+        buildRadius = gameConfig.BuildRadius;
+        buildingRadius = gameConfig.BuildingRadius;
+        infantryTrainingTime = gameConfig.InfantryTrainingTime;
+        maxFactoryQueueSize = gameConfig.MaxFactoryQueueSize;
+        playerBaseHitPoints = gameConfig.PlayerBaseHitPoints;
+        factoryHitPoints = gameConfig.FactoryHitPoints;
+        enemyBaseHitPoints = gameConfig.EnemyBaseHitPoints;
+        infantryAttackDamage = gameConfig.InfantryAttackDamage;
+        infantryAttackRange = gameConfig.InfantryAttackRange;
+        infantryAttackCooldown = gameConfig.InfantryAttackCooldown;
+        playerInfantryHitPoints = gameConfig.PlayerInfantryHitPoints;
+        enemyInfantryHitPoints = gameConfig.EnemyInfantryHitPoints;
+        unitAggroRange = gameConfig.UnitAggroRange;
+        enemySpawnInterval = gameConfig.EnemySpawnInterval;
+        enemyInfantryAttackDamage = gameConfig.EnemyInfantryAttackDamage;
+        enemyInfantryAttackRange = gameConfig.EnemyInfantryAttackRange;
+        enemyInfantryAttackCooldown = gameConfig.EnemyInfantryAttackCooldown;
+        startingResources = gameConfig.StartingResources;
+        factoryCost = gameConfig.FactoryCost;
+        infantryCost = gameConfig.InfantryCost;
+        passiveResourceIncome = gameConfig.PassiveResourceIncome;
+        passiveResourceInterval = gameConfig.PassiveResourceInterval;
+        infantryRadius = gameConfig.InfantryRadius;
+        unitMoveSpeed = gameConfig.UnitMoveSpeed;
+        cameraMoveSpeed = gameConfig.CameraMoveSpeed;
+        cameraZoomSpeed = gameConfig.CameraZoomSpeed;
+        minCameraSize = gameConfig.MinCameraSize;
+        maxCameraSize = gameConfig.MaxCameraSize;
+        dragSelectThreshold = gameConfig.DragSelectThreshold;
     }
 
     private void Update()
@@ -277,7 +205,7 @@ public class GameBootstrap : MonoBehaviour
         }
 
         matchTime += Time.deltaTime;
-        UpdateCameraControls();
+        cameraController.Tick(Time.deltaTime);
         UpdateResources();
         UpdateFactoryProduction();
         HandleSelectionInput();
@@ -741,50 +669,6 @@ public class GameBootstrap : MonoBehaviour
         placementPreviewObject = null;
         buildRangeObject = null;
         baseObject = null;
-    }
-
-    private void SetupCamera()
-    {
-        if (mainCamera == null)
-        {
-            Debug.LogError("No Main Camera found.");
-            return;
-        }
-
-        mainCamera.orthographic = true;
-        mainCamera.transform.position = new Vector3(0, 0, -10);
-        mainCamera.orthographicSize = 18f;
-        mainCamera.backgroundColor = new Color(0.08f, 0.08f, 0.09f);
-    }
-
-    private void UpdateCameraControls()
-    {
-        if (mainCamera == null)
-        {
-            return;
-        }
-
-        Vector2 input = new Vector2(Input.GetAxisRaw("Horizontal"), Input.GetAxisRaw("Vertical"));
-        Vector3 position = mainCamera.transform.position;
-        position += new Vector3(input.x, input.y, 0f).normalized * cameraMoveSpeed * Time.deltaTime;
-
-        float scroll = Input.mouseScrollDelta.y;
-        mainCamera.orthographicSize = Mathf.Clamp(
-            mainCamera.orthographicSize - scroll * cameraZoomSpeed,
-            minCameraSize,
-            maxCameraSize
-        );
-
-        float mapHalf = GetMapHalfSize();
-        float verticalExtent = mainCamera.orthographicSize;
-        float horizontalExtent = verticalExtent * mainCamera.aspect;
-        float maxX = Mathf.Max(0f, mapHalf - horizontalExtent);
-        float maxY = Mathf.Max(0f, mapHalf - verticalExtent);
-
-        position.x = Mathf.Clamp(position.x, -maxX, maxX);
-        position.y = Mathf.Clamp(position.y, -maxY, maxY);
-        position.z = -10f;
-        mainCamera.transform.position = position;
     }
 
     private void CreateGrid()

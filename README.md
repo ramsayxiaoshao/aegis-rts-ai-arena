@@ -17,6 +17,7 @@ The project explores a tactical RTS environment where human players can fight ag
 - `AegisRts/` - Unity game project
 
 - `docs/` - design notes and the in-process Arena API contract
+- `Assets/_Project/Resources/RtsGameConfig.asset` - centralized gameplay balance
 
 ## Current Stage
 
@@ -34,4 +35,5 @@ Playable Unity vertical slice:
 - query structured match observations and submit agent actions through the Arena API.
 
 See [`docs/arena-api.md`](docs/arena-api.md) for the agent-facing contract.
+See [`docs/architecture.md`](docs/architecture.md) for the runtime component boundaries and extraction order.
 
