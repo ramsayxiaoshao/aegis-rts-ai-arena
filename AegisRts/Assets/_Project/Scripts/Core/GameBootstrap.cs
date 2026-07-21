@@ -87,7 +87,6 @@ public class GameBootstrap : MonoBehaviour
     private Vector2 currentPreviewPosition;
     private Vector2Int currentPreviewCell;
 
-    private bool isBuildMenuOpen = false;
     private bool hasPreviewCell = false;
     private bool gameWorldCreated = false;
 
@@ -354,7 +353,6 @@ public class GameBootstrap : MonoBehaviour
         playerBaseData = null;
         enemyBaseData = null;
         selectedBuilding = BuildingType.None;
-        isBuildMenuOpen = false;
         hasPreviewCell = false;
         selectionRingObject = null;
         placementPreviewObject = null;

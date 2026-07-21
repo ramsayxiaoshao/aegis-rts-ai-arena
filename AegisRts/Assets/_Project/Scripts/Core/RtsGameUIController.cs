@@ -9,12 +9,14 @@ internal sealed class RtsGameUIController
     private sealed class HealthView
     {
         public GameObject Root;
+        public RectTransform RootRect;
         public RectTransform Fill;
         public Image FillImage;
     }
 
     private readonly Font font;
     private readonly GameObject canvasObject;
+    private readonly Canvas canvas;
     private readonly GameObject menuPanel;
     private readonly GameObject hudPanel;
     private readonly GameObject overlayPanel;
@@ -41,7 +43,7 @@ internal sealed class RtsGameUIController
         EnsureEventSystem();
 
         canvasObject = new GameObject("RtsGameUI", typeof(Canvas), typeof(CanvasScaler), typeof(GraphicRaycaster));
-        Canvas canvas = canvasObject.GetComponent<Canvas>();
+        canvas = canvasObject.GetComponent<Canvas>();
         canvas.renderMode = RenderMode.ScreenSpaceOverlay;
         canvas.sortingOrder = 100;
         CanvasScaler scaler = canvasObject.GetComponent<CanvasScaler>();
@@ -67,6 +69,7 @@ internal sealed class RtsGameUIController
         selectionRect.anchorMin = Vector2.zero;
         selectionRect.anchorMax = Vector2.zero;
         selectionRect.pivot = Vector2.zero;
+        selection.GetComponent<Image>().raycastTarget = false;
         selection.SetActive(false);
 
         overlayPanel = CreatePanel("Overlay", canvasObject.transform, new Vector2(0.34f, 0.30f), new Vector2(0.66f, 0.70f), new Color(0.025f, 0.035f, 0.055f, 0.97f));
@@ -157,8 +160,8 @@ internal sealed class RtsGameUIController
             return;
         }
 
-        Vector2 min = Vector2.Min(input.DragStart, input.DragCurrent);
-        Vector2 max = Vector2.Max(input.DragStart, input.DragCurrent);
+        Vector2 min = ScreenToCanvas(Vector2.Min(input.DragStart, input.DragCurrent));
+        Vector2 max = ScreenToCanvas(Vector2.Max(input.DragStart, input.DragCurrent));
         selectionRect.gameObject.SetActive(true);
         selectionRect.anchoredPosition = min;
         selectionRect.sizeDelta = max - min;
@@ -170,12 +173,12 @@ internal sealed class RtsGameUIController
 
         foreach (BuildingData building in buildings)
         {
-            UpdateHealthView(building, building.Position, building.HitPoints, building.MaxHitPoints, camera, visible);
+            UpdateHealthView(building, building.Position, building.Radius, building.HitPoints, building.MaxHitPoints, camera, visible);
         }
 
         foreach (UnitData unit in units)
         {
-            UpdateHealthView(unit, unit.Position, unit.HitPoints, unit.MaxHitPoints, camera, visible);
+            UpdateHealthView(unit, unit.Position, unit.Radius, unit.HitPoints, unit.MaxHitPoints, camera, visible);
         }
 
         List<object> stale = new List<object>();
@@ -195,9 +198,17 @@ internal sealed class RtsGameUIController
         }
     }
 
-    private void UpdateHealthView(object key, Vector2 world, int hp, int maxHp, Camera camera, ISet<object> visible)
+    private void UpdateHealthView(
+        object key,
+        Vector2 world,
+        float worldRadius,
+        int hp,
+        int maxHp,
+        Camera camera,
+        ISet<object> visible
+    )
     {
-        if (hp >= maxHp || maxHp <= 0 || camera == null)
+        if (maxHp <= 0 || camera == null)
         {
             return;
         }
@@ -212,21 +223,40 @@ internal sealed class RtsGameUIController
             rootRect.anchorMax = Vector2.zero;
             rootRect.pivot = new Vector2(0.5f, 0.5f);
             rootRect.sizeDelta = new Vector2(42f, 6f);
+            root.GetComponent<Image>().raycastTarget = false;
             GameObject fill = CreatePanel("Fill", root.transform, Vector2.zero, Vector2.one, Color.green);
             RectTransform fillRect = fill.GetComponent<RectTransform>();
             fillRect.anchorMin = Vector2.zero;
             fillRect.anchorMax = Vector2.zero;
             fillRect.pivot = Vector2.zero;
-            view = new HealthView { Root = root, Fill = fillRect, FillImage = fill.GetComponent<Image>() };
+            fill.GetComponent<Image>().raycastTarget = false;
+            view = new HealthView
+            {
+                Root = root,
+                RootRect = rootRect,
+                Fill = fillRect,
+                FillImage = fill.GetComponent<Image>()
+            };
             healthViews[key] = view;
         }
 
         float ratio = Mathf.Clamp01((float)hp / maxHp);
         Vector3 screen = camera.WorldToScreenPoint(world);
+        Vector3 topScreen = camera.WorldToScreenPoint(world + Vector2.up * (worldRadius + 0.16f));
+        Vector3 radiusScreen = camera.WorldToScreenPoint(world + Vector2.right * worldRadius);
+        float scale = Mathf.Max(canvas.scaleFactor, 0.0001f);
+        float width = Mathf.Clamp(Mathf.Abs(radiusScreen.x - screen.x) * 1.8f / scale, 24f, 56f);
         view.Root.SetActive(screen.z >= 0f);
-        view.Root.GetComponent<RectTransform>().anchoredPosition = new Vector2(screen.x, screen.y + 22f);
-        view.Fill.sizeDelta = new Vector2(42f * ratio, 6f);
+        view.RootRect.anchoredPosition = ScreenToCanvas(topScreen);
+        view.RootRect.sizeDelta = new Vector2(width, 6f);
+        view.Fill.sizeDelta = new Vector2(width * ratio, 6f);
         view.FillImage.color = ratio > 0.5f ? Color.green : ratio > 0.25f ? Color.yellow : Color.red;
+    }
+
+    private Vector2 ScreenToCanvas(Vector2 screenPosition)
+    {
+        float scale = Mathf.Max(canvas.scaleFactor, 0.0001f);
+        return screenPosition / scale;
     }
 
     private void ClearHealthViews()
