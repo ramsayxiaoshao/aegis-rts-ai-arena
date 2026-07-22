@@ -17,9 +17,11 @@ The prototype runtime is being split incrementally so gameplay stays playable du
 - `RtsSelectionInputController` owns click, drag-selection, and command-input state.
 - `RtsEconomyProductionSystem` owns player resources, passive income, factory queues, and production timing.
 - `RtsCombatSystem` owns target acquisition, pursuit, cooldowns, damage, and combat resolution.
+- `CombatFeedbackEvent` is the one-way boundary from deterministic combat resolution to presentation.
+- `RtsWorldFeedbackSystem` owns transient attack projectiles, hit flashes, and death pulses.
 - `RtsEntityLifecycle` owns entity removal, occupancy cleanup, target cleanup, and destruction callbacks.
 - `ArenaOrchestrator` owns observation building, action validation, entity lookup, and command routing.
-- `RtsGameUIController` builds and updates the runtime uGUI menu, HUD, command panel, overlays, selection rectangle, and health bars.
+- `RtsGameUIController` builds and updates the runtime uGUI menu, HUD, command panel, overlays, selection rectangle, health bars, production progress, and transient notifications.
 - `ArenaGameRules` contains deterministic economy and damage rules.
 - `GridPathfinder` contains deterministic grid path search.
 - `ArenaContracts` defines serializable observations, actions, entities, and results.
@@ -31,6 +33,8 @@ The default balance asset is `Assets/_Project/Resources/RtsGameConfig.asset`. `G
 The initial runtime extraction is complete. `GameBootstrap` now coordinates match state, domain registration, and the extracted systems instead of implementing each subsystem internally.
 
 Presentation assets live under `Assets/_Project/Prefabs/Presentation`. They can be regenerated through `Aegis RTS > Generate Presentation Prefabs`; the generator also maintains the shared circle Sprite, grid material, and `PresentationPrefabCatalog` asset.
+
+Combat feedback remains presentation-only: `RtsCombatSystem` publishes immutable hit data and never depends on visual state. Production progress is derived from the existing factory queue, so the Arena observation and action contract stays unchanged.
 
 The next presentation step is to replace the placeholder circle Sprite inside those prefabs with authored unit and building art. Enemy strategy can evolve behind `EnemyAISystem` without changing the Arena contract.
 

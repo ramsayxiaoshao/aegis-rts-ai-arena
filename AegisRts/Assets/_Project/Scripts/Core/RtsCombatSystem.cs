@@ -9,13 +9,15 @@ internal sealed class RtsCombatSystem
     private readonly IList<UnitData> units;
     private readonly Action<UnitData, Vector2> moveTowards;
     private readonly RtsEntityLifecycle lifecycle;
+    private readonly Action<CombatFeedbackEvent> publishFeedback;
 
     public RtsCombatSystem(
         RtsGameConfig gameConfig,
         IList<BuildingData> buildingList,
         IList<UnitData> unitList,
         Action<UnitData, Vector2> movement,
-        RtsEntityLifecycle entityLifecycle
+        RtsEntityLifecycle entityLifecycle,
+        Action<CombatFeedbackEvent> feedback = null
     )
     {
         config = gameConfig;
@@ -23,6 +25,7 @@ internal sealed class RtsCombatSystem
         units = unitList;
         moveTowards = movement;
         lifecycle = entityLifecycle;
+        publishFeedback = feedback;
     }
 
     public void Tick(float deltaTime)
@@ -106,6 +109,7 @@ internal sealed class RtsCombatSystem
 
         attacker.AttackTimer = attacker.AttackCooldown;
         target.HitPoints = ArenaGameRules.ApplyDamage(target.HitPoints, attacker.AttackDamage);
+        PublishFeedback(attacker, target.Position, target.GameObject, target.HitPoints <= 0);
 
         if (target.HitPoints <= 0)
         {
@@ -139,11 +143,29 @@ internal sealed class RtsCombatSystem
 
         attacker.AttackTimer = attacker.AttackCooldown;
         target.HitPoints = ArenaGameRules.ApplyDamage(target.HitPoints, attacker.AttackDamage);
+        PublishFeedback(attacker, target.Position, target.GameObject, target.HitPoints <= 0);
 
         if (target.HitPoints <= 0)
         {
             lifecycle.DestroyBuilding(target);
             attacker.AttackTarget = null;
         }
+    }
+
+    private void PublishFeedback(
+        UnitData attacker,
+        Vector2 targetPosition,
+        GameObject targetObject,
+        bool isLethal
+    )
+    {
+        publishFeedback?.Invoke(new CombatFeedbackEvent(
+            attacker.Position,
+            targetPosition,
+            targetObject,
+            attacker.Team,
+            attacker.AttackDamage,
+            isLethal
+        ));
     }
 }

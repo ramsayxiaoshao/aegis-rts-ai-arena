@@ -26,8 +26,14 @@ internal sealed class RtsGameUIController
     private readonly Button cancelBuildButton;
     private readonly Button trainButton;
     private readonly Text trainButtonText;
+    private readonly GameObject productionProgress;
+    private readonly RectTransform productionFill;
+    private readonly Text productionText;
+    private readonly GameObject notificationPanel;
+    private readonly Text notificationText;
     private readonly RectTransform selectionRect;
     private readonly Dictionary<object, HealthView> healthViews = new Dictionary<object, HealthView>();
+    private float notificationTimer;
 
     public RtsGameUIController(
         Action startGame,
@@ -62,7 +68,54 @@ internal sealed class RtsGameUIController
         cancelBuildButton = CreateButton("CancelBuild", commandPanel.transform, "取消建造", new Vector2(0.08f, 0.59f), new Vector2(0.92f, 0.70f), cancelBuild);
         trainButton = CreateButton("Train", commandPanel.transform, "生产步兵", new Vector2(0.08f, 0.43f), new Vector2(0.92f, 0.54f), trainInfantry);
         trainButtonText = trainButton.GetComponentInChildren<Text>();
+        productionProgress = CreatePanel(
+            "ProductionProgress",
+            commandPanel.transform,
+            new Vector2(0.08f, 0.39f),
+            new Vector2(0.92f, 0.42f),
+            new Color(0.02f, 0.08f, 0.12f, 0.95f)
+        );
+        productionProgress.GetComponent<Image>().raycastTarget = false;
+        GameObject progressFill = CreatePanel(
+            "ProductionFill",
+            productionProgress.transform,
+            Vector2.zero,
+            Vector2.one,
+            new Color(0.15f, 0.75f, 1f, 0.9f)
+        );
+        progressFill.GetComponent<Image>().raycastTarget = false;
+        productionFill = progressFill.GetComponent<RectTransform>();
+        productionText = CreateText(
+            "ProductionText",
+            productionProgress.transform,
+            string.Empty,
+            14,
+            TextAnchor.MiddleCenter,
+            Vector2.zero,
+            Vector2.one
+        );
+        productionProgress.SetActive(false);
         infoText = CreateText("Info", commandPanel.transform, "未选中对象", 19, TextAnchor.UpperLeft, new Vector2(0.08f, 0.05f), new Vector2(0.92f, 0.38f));
+
+        notificationPanel = CreatePanel(
+            "Notification",
+            hudPanel.transform,
+            new Vector2(0.32f, 0.86f),
+            new Vector2(0.68f, 0.92f),
+            new Color(0.05f, 0.24f, 0.36f, 0.96f)
+        );
+        notificationPanel.GetComponent<Image>().raycastTarget = false;
+        notificationText = CreateText(
+            "NotificationText",
+            notificationPanel.transform,
+            string.Empty,
+            21,
+            TextAnchor.MiddleCenter,
+            new Vector2(0.03f, 0.05f),
+            new Vector2(0.97f, 0.95f)
+        );
+        notificationText.raycastTarget = false;
+        notificationPanel.SetActive(false);
 
         GameObject selection = CreatePanel("SelectionRectangle", hudPanel.transform, Vector2.zero, Vector2.zero, new Color(0.15f, 0.7f, 1f, 0.2f));
         selectionRect = selection.GetComponent<RectTransform>();
@@ -85,6 +138,31 @@ internal sealed class RtsGameUIController
         return EventSystem.current != null && EventSystem.current.IsPointerOverGameObject();
     }
 
+    public void Tick(float unscaledDeltaTime)
+    {
+        if (notificationTimer <= 0f)
+        {
+            return;
+        }
+
+        notificationTimer -= unscaledDeltaTime;
+
+        if (notificationTimer <= 0f)
+        {
+            notificationPanel.SetActive(false);
+        }
+    }
+
+    public void ShowNotification(string message, bool isError = false)
+    {
+        notificationText.text = message;
+        notificationPanel.GetComponent<Image>().color = isError
+            ? new Color(0.48f, 0.10f, 0.10f, 0.96f)
+            : new Color(0.05f, 0.24f, 0.36f, 0.96f);
+        notificationPanel.SetActive(true);
+        notificationTimer = 2.4f;
+    }
+
     public void Refresh(
         GameState state,
         bool paused,
@@ -94,6 +172,7 @@ internal sealed class RtsGameUIController
         int factoryCost,
         int infantryCost,
         int maxQueue,
+        float infantryTrainingTime,
         BuildingType buildMode,
         BuildingData selectedBuilding,
         IList<UnitData> selectedUnits,
@@ -121,6 +200,36 @@ internal sealed class RtsGameUIController
         trainButtonText.text = factorySelected
             ? $"生产步兵 ({selectedBuilding.InfantryQueue}/{maxQueue})"
             : "选择兵厂后生产";
+        BuildingData producingFactory = factorySelected ? selectedBuilding : null;
+
+        if (producingFactory == null)
+        {
+            foreach (BuildingData building in buildings)
+            {
+                if (building.Team == Team.Player &&
+                    building.Type == BuildingType.Factory &&
+                    building.InfantryQueue > 0)
+                {
+                    producingFactory = building;
+                    break;
+                }
+            }
+        }
+
+        bool producing = producingFactory != null && producingFactory.InfantryQueue > 0;
+        productionProgress.SetActive(producing);
+
+        if (producing)
+        {
+            float progress = infantryTrainingTime > 0f
+                ? 1f - Mathf.Clamp01(producingFactory.ProductionTimer / infantryTrainingTime)
+                : 0f;
+            productionFill.anchorMin = Vector2.zero;
+            productionFill.anchorMax = new Vector2(progress, 1f);
+            productionFill.offsetMin = Vector2.zero;
+            productionFill.offsetMax = Vector2.zero;
+            productionText.text = $"生产 {Mathf.RoundToInt(progress * 100f)}% · 队列 {producingFactory.InfantryQueue}";
+        }
 
         if (selectedBuilding != null)
         {
