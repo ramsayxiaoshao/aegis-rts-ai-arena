@@ -63,6 +63,7 @@ public class GameBootstrap : MonoBehaviour
     private ArenaOrchestrator arena;
     private RtsEntityLifecycle lifecycle;
     private RtsCombatSystem combat;
+    private RtsWorldFeedbackSystem feedback;
     private RtsSelectionInputController selectionInput;
     private RtsGameUIController ui;
     private bool isPaused;
@@ -142,7 +143,14 @@ public class GameBootstrap : MonoBehaviour
             OnUnitRemoved,
             OnBuildingRemoved
         );
-        combat = new RtsCombatSystem(gameConfig, buildings, units, MoveUnitTowards, lifecycle);
+        combat = new RtsCombatSystem(
+            gameConfig,
+            buildings,
+            units,
+            MoveUnitTowards,
+            lifecycle,
+            PlayCombatFeedback
+        );
         selectionInput = new RtsSelectionInputController(dragSelectThreshold);
         ui = new RtsGameUIController(
             StartGame,
@@ -249,6 +257,7 @@ public class GameBootstrap : MonoBehaviour
         HandlePlacementConfirm();
         enemyAI.Tick(Time.deltaTime, playerBaseData, enemyBaseData);
         combat.Tick(Time.deltaTime);
+        feedback?.Tick(Time.deltaTime);
         movement.Tick(Time.deltaTime);
         UpdateSelectionRingPositions();
     }
@@ -299,6 +308,7 @@ public class GameBootstrap : MonoBehaviour
 
         gridRoot = new GameObject("GridRoot").transform;
         buildingRoot = new GameObject("BuildingRoot").transform;
+        feedback = new RtsWorldFeedbackSystem(presentation, buildingRoot);
 
         CreateGrid();
         CreateBase();
@@ -331,6 +341,8 @@ public class GameBootstrap : MonoBehaviour
 
     private void DestroyGameWorld()
     {
+        feedback?.Clear();
+        feedback = null;
         ClearUnitSelectionRings();
 
         if (gridRoot != null)
@@ -514,6 +526,7 @@ public class GameBootstrap : MonoBehaviour
         if (!placement.CanAfford(BuildingType.Factory))
         {
             Debug.LogWarning($"Cannot select Factory: not enough resources. Need {factoryCost}, have {economy.Resources}.");
+            ui.ShowNotification($"资源不足：建造兵厂需要 {factoryCost}", true);
             return;
         }
 
@@ -943,6 +956,7 @@ public class GameBootstrap : MonoBehaviour
             factoryCost,
             infantryCost,
             maxFactoryQueueSize,
+            infantryTrainingTime,
             selectedBuilding,
             selectedBuildingData,
             selectedUnits,
@@ -951,10 +965,12 @@ public class GameBootstrap : MonoBehaviour
             units,
             mainCamera
         );
+        ui.Tick(Time.unscaledDeltaTime);
     }
 
     private void OnDestroy()
     {
+        feedback?.Clear();
         ui?.Destroy();
         presentation?.Dispose();
     }
@@ -967,6 +983,11 @@ public class GameBootstrap : MonoBehaviour
     private void TrainSelectedFactory()
     {
         TryTrainInfantry(selectedBuildingData);
+    }
+
+    private void PlayCombatFeedback(CombatFeedbackEvent combatFeedback)
+    {
+        feedback?.PlayCombatFeedback(combatFeedback);
     }
 
     private void ResumeGame()
@@ -1081,10 +1102,12 @@ public class GameBootstrap : MonoBehaviour
             if (!placement.CanAfford(selectedBuilding))
             {
                 Debug.LogWarning($"Cannot build: not enough resources. Need {placement.GetCost(selectedBuilding)}, have {economy.Resources}.");
+                ui.ShowNotification($"资源不足：建造兵厂需要 {placement.GetCost(selectedBuilding)}", true);
             }
             else
             {
                 Debug.LogWarning("Cannot build here: out of range or cell is occupied.");
+                ui.ShowNotification("无法建造：位置超出范围或格子已被占用", true);
             }
 
             return;
@@ -1127,12 +1150,38 @@ public class GameBootstrap : MonoBehaviour
         buildings.Add(factory);
         
         Debug.Log($"Factory built at cell {cell}. Remaining resources: {economy.Resources}");
+        ui.ShowNotification("兵厂建造完成");
         return true;
     }
 
     private bool TryTrainInfantry(BuildingData factory)
     {
-        return economy.TryQueueInfantry(factory);
+        if (factory == null || factory.Type != BuildingType.Factory)
+        {
+            ui.ShowNotification("请先选择一座兵厂", true);
+            return false;
+        }
+
+        if (factory.InfantryQueue >= maxFactoryQueueSize)
+        {
+            ui.ShowNotification("生产队列已满", true);
+            return false;
+        }
+
+        if (!economy.CanAfford(infantryCost))
+        {
+            ui.ShowNotification($"资源不足：生产步兵需要 {infantryCost}", true);
+            return false;
+        }
+
+        if (!economy.TryQueueInfantry(factory))
+        {
+            ui.ShowNotification("步兵生产请求未被接受", true);
+            return false;
+        }
+
+        ui.ShowNotification($"步兵已加入生产队列（{factory.InfantryQueue}/{maxFactoryQueueSize}）");
+        return true;
     }
 
     private bool TrySpawnPlayerInfantry(BuildingData factory)

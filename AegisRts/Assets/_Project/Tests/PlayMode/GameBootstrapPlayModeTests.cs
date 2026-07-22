@@ -53,6 +53,15 @@ public sealed class GameBootstrapPlayModeTests
 
         Assert.IsTrue(buildResult.Accepted, buildResult.Message);
         Assert.IsTrue(trainResult.Accepted, trainResult.Message);
+        yield return null;
+
+        GameObject notification = GameObject.Find("Notification");
+        GameObject productionProgress = GameObject.Find("ProductionProgress");
+        Assert.IsNotNull(notification, "Accepted production should show a short UI notification.");
+        Assert.IsNotNull(productionProgress, "Queued infantry should show production progress.");
+        Assert.IsTrue(productionProgress.activeSelf);
+        Assert.IsNotEmpty(productionProgress.GetComponentInChildren<Text>().text);
+
         yield return new WaitForSeconds(3.2f);
         yield return null;
 
@@ -72,5 +81,6 @@ public sealed class GameBootstrapPlayModeTests
 
         Assert.AreEqual(1, healthBars.Length, "Every infantry unit should have exactly one visible health bar.");
         Assert.Less(nearestDistance, 2f, "The infantry health bar should stay directly above its unit.");
+        Assert.IsFalse(productionProgress.activeSelf, "Production progress should hide when the queue is empty.");
     }
 }

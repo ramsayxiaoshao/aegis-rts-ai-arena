@@ -106,6 +106,51 @@ public sealed class RuntimeSystemsTests
     }
 
     [Test]
+    public void WorldFeedback_PlaysAndExpiresCombatEffects()
+    {
+        EntityPresentationFactory presentation = new EntityPresentationFactory(16);
+        GameObject root = new GameObject("FeedbackRoot");
+        GameObject target = presentation.CreateCircle(
+            "Target",
+            Vector2.right,
+            0.4f,
+            Color.red,
+            20,
+            root.transform
+        );
+        RtsWorldFeedbackSystem feedback = new RtsWorldFeedbackSystem(
+            presentation,
+            root.transform
+        );
+
+        try
+        {
+            feedback.PlayCombatFeedback(new CombatFeedbackEvent(
+                Vector2.zero,
+                Vector2.right,
+                target,
+                Team.Player,
+                20,
+                true
+            ));
+
+            Assert.AreEqual(3, feedback.ActiveEffectCount);
+            Assert.AreEqual(Color.white, target.GetComponent<SpriteRenderer>().color);
+
+            feedback.Tick(1f);
+
+            Assert.AreEqual(0, feedback.ActiveEffectCount);
+            Assert.AreEqual(Color.red, target.GetComponent<SpriteRenderer>().color);
+        }
+        finally
+        {
+            feedback.Clear();
+            Object.DestroyImmediate(root);
+            presentation.Dispose();
+        }
+    }
+
+    [Test]
     public void GridMap_ConvertsCoordinatesAndFindsOpenSpawnCell()
     {
         GridMapService gridMap = new GridMapService(10, 1f);
@@ -323,13 +368,25 @@ public sealed class RuntimeSystemsTests
         units.Add(target);
         occupied.Add(attacker.Cell);
         occupied.Add(target.Cell);
+        List<CombatFeedbackEvent> feedbackEvents = new List<CombatFeedbackEvent>();
         RtsEntityLifecycle lifecycle = new RtsEntityLifecycle(buildings, units, occupied, null, null);
-        RtsCombatSystem combat = new RtsCombatSystem(config, buildings, units, (_, _) => { }, lifecycle);
+        RtsCombatSystem combat = new RtsCombatSystem(
+            config,
+            buildings,
+            units,
+            (_, _) => { },
+            lifecycle,
+            feedbackEvents.Add
+        );
 
         combat.Tick(0.1f);
 
         Assert.AreEqual(1, units.Count);
         Assert.IsFalse(units.Contains(target));
+        Assert.AreEqual(1, feedbackEvents.Count);
+        Assert.AreEqual(attacker.AttackDamage, feedbackEvents[0].Damage);
+        Assert.AreEqual(Team.Player, feedbackEvents[0].SourceTeam);
+        Assert.IsTrue(feedbackEvents[0].IsLethal);
         Object.DestroyImmediate(config);
     }
 
