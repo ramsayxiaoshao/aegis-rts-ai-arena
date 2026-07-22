@@ -64,6 +64,7 @@ public class GameBootstrap : MonoBehaviour
     private RtsEntityLifecycle lifecycle;
     private RtsCombatSystem combat;
     private RtsWorldFeedbackSystem feedback;
+    private RtsAudioFeedbackSystem audioFeedback;
     private RtsSelectionInputController selectionInput;
     private RtsGameUIController ui;
     private bool isPaused;
@@ -309,6 +310,7 @@ public class GameBootstrap : MonoBehaviour
         gridRoot = new GameObject("GridRoot").transform;
         buildingRoot = new GameObject("BuildingRoot").transform;
         feedback = new RtsWorldFeedbackSystem(presentation, buildingRoot);
+        audioFeedback = new RtsAudioFeedbackSystem(buildingRoot);
 
         CreateGrid();
         CreateBase();
@@ -343,6 +345,8 @@ public class GameBootstrap : MonoBehaviour
     {
         feedback?.Clear();
         feedback = null;
+        audioFeedback?.Destroy();
+        audioFeedback = null;
         ClearUnitSelectionRings();
 
         if (gridRoot != null)
@@ -971,6 +975,7 @@ public class GameBootstrap : MonoBehaviour
     private void OnDestroy()
     {
         feedback?.Clear();
+        audioFeedback?.Destroy();
         ui?.Destroy();
         presentation?.Dispose();
     }
@@ -988,6 +993,7 @@ public class GameBootstrap : MonoBehaviour
     private void PlayCombatFeedback(CombatFeedbackEvent combatFeedback)
     {
         feedback?.PlayCombatFeedback(combatFeedback);
+        audioFeedback?.PlayCombat(combatFeedback);
     }
 
     private void ResumeGame()
@@ -1192,6 +1198,7 @@ public class GameBootstrap : MonoBehaviour
         }
 
         SpawnPlayerInfantry(spawnCell);
+        audioFeedback?.PlayProductionComplete();
         return true;
     }
 

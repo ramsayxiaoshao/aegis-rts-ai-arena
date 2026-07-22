@@ -55,7 +55,7 @@ public sealed class RuntimeSystemsTests
     }
 
     [Test]
-    public void PresentationFactory_CreatesLabeledCircleAndUpdatesColor()
+    public void PresentationFactory_UsesAuthoredPrefabAndPreservesSpriteColor()
     {
         EntityPresentationFactory presentation = new EntityPresentationFactory(16);
         GameObject root = new GameObject("PresentationRoot");
@@ -74,6 +74,28 @@ public sealed class RuntimeSystemsTests
             Assert.IsNotNull(catalog.EnemyInfantryPrefab);
             Assert.IsNotNull(catalog.CircleOverlayPrefab);
             Assert.IsNotNull(catalog.GridLinePrefab);
+            Assert.IsNotNull(catalog.AttackClip);
+            Assert.IsNotNull(catalog.HitClip);
+            Assert.IsNotNull(catalog.ProductionCompleteClip);
+
+            GameObject[] authoredPrefabs =
+            {
+                catalog.PlayerBasePrefab,
+                catalog.EnemyBasePrefab,
+                catalog.FactoryPrefab,
+                catalog.PlayerInfantryPrefab,
+                catalog.EnemyInfantryPrefab
+            };
+
+            foreach (GameObject authoredPrefab in authoredPrefabs)
+            {
+                SpriteRenderer prefabRenderer = authoredPrefab.GetComponent<SpriteRenderer>();
+                Assert.IsNotNull(prefabRenderer);
+                Assert.IsNotNull(prefabRenderer.sprite);
+                Assert.AreNotEqual("Circle", prefabRenderer.sprite.name);
+                Assert.IsNotNull(authoredPrefab.GetComponent<RtsEntityViewAnimator>());
+                Assert.IsNull(authoredPrefab.GetComponentInChildren<TextMesh>());
+            }
 
             GameObject circle = presentation.CreateLabeledCircle(
                 PresentationEntityKind.EnemyBase,
@@ -88,11 +110,14 @@ public sealed class RuntimeSystemsTests
             );
             SpriteRenderer renderer = circle.GetComponent<SpriteRenderer>();
             TextMesh label = circle.GetComponentInChildren<TextMesh>();
+            RtsEntityViewAnimator animator = circle.GetComponent<RtsEntityViewAnimator>();
 
             Assert.IsNotNull(renderer);
             Assert.IsNotNull(renderer.sprite);
-            Assert.IsNotNull(label);
-            Assert.AreEqual("AI", label.text);
+            Assert.AreNotEqual("Circle", renderer.sprite.name);
+            Assert.IsNull(label);
+            Assert.IsNotNull(animator);
+            Assert.AreEqual(Color.white, renderer.color);
             Assert.AreEqual(root.transform, circle.transform.parent);
 
             presentation.SetCircleColor(circle, Color.green);
@@ -128,6 +153,7 @@ public sealed class RuntimeSystemsTests
             feedback.PlayCombatFeedback(new CombatFeedbackEvent(
                 Vector2.zero,
                 Vector2.right,
+                null,
                 target,
                 Team.Player,
                 20,
@@ -135,7 +161,7 @@ public sealed class RuntimeSystemsTests
             ));
 
             Assert.AreEqual(3, feedback.ActiveEffectCount);
-            Assert.AreEqual(Color.white, target.GetComponent<SpriteRenderer>().color);
+            Assert.AreEqual(new Color(1f, 0.3f, 0.3f, 1f), target.GetComponent<SpriteRenderer>().color);
 
             feedback.Tick(1f);
 

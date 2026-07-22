@@ -66,6 +66,8 @@ internal sealed class RtsWorldFeedbackSystem
             End = feedback.TargetPosition
         });
 
+        PlayEntityAnimation(feedback.SourceObject, true);
+        PlayEntityAnimation(feedback.TargetObject, false);
         PlayHitFlash(feedback.TargetObject);
 
         if (feedback.IsLethal)
@@ -120,7 +122,7 @@ internal sealed class RtsWorldFeedbackSystem
             if (flash.Renderer == renderer)
             {
                 flash.Remaining = HitFlashDuration;
-                renderer.color = Color.white;
+                renderer.color = new Color(1f, 0.3f, 0.3f, 1f);
                 return;
             }
         }
@@ -131,7 +133,28 @@ internal sealed class RtsWorldFeedbackSystem
             OriginalColor = renderer.color,
             Remaining = HitFlashDuration
         });
-        renderer.color = Color.white;
+        renderer.color = new Color(1f, 0.3f, 0.3f, 1f);
+    }
+
+    private static void PlayEntityAnimation(GameObject entity, bool isAttack)
+    {
+        RtsEntityViewAnimator animator = entity != null
+            ? entity.GetComponent<RtsEntityViewAnimator>()
+            : null;
+
+        if (animator == null)
+        {
+            return;
+        }
+
+        if (isAttack)
+        {
+            animator.PlayAttack();
+        }
+        else
+        {
+            animator.PlayHit();
+        }
     }
 
     private void PlayDeathEffect(Vector2 position, Color color)

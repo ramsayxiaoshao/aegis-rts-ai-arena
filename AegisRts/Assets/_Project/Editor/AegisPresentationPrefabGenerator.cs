@@ -1,4 +1,6 @@
+using System;
 using System.IO;
+using System.Text;
 using UnityEditor;
 using UnityEngine;
 
@@ -8,9 +10,44 @@ public static class AegisPresentationPrefabGenerator
     private const string PrefabDirectory = "Assets/_Project/Prefabs/Presentation";
     private const string ResourceDirectory = "Assets/_Project/Resources";
     private const string MaterialDirectory = "Assets/_Project/Materials";
+    private const string AudioDirectory = "Assets/_Project/Audio/Generated";
     private const string CircleAssetPath = ArtDirectory + "/Circle.png";
+    private const string PlayerInfantryPath = "Assets/_Project/Art/Units/PlayerInfantry.png";
+    private const string EnemyInfantryPath = "Assets/_Project/Art/Units/EnemyInfantry.png";
+    private const string PlayerBasePath = "Assets/_Project/Art/Buildings/PlayerBase.png";
+    private const string EnemyBasePath = "Assets/_Project/Art/Buildings/EnemyBase.png";
+    private const string FactoryPath = "Assets/_Project/Art/Buildings/InfantryFactory.png";
     private const string CatalogAssetPath = ResourceDirectory + "/PresentationPrefabCatalog.asset";
     private const string GridMaterialPath = MaterialDirectory + "/GridLine.mat";
+    private const string AttackClipPath = AudioDirectory + "/Attack.wav";
+    private const string HitClipPath = AudioDirectory + "/Hit.wav";
+    private const string ProductionClipPath = AudioDirectory + "/ProductionComplete.wav";
+
+    [InitializeOnLoadMethod]
+    private static void ScheduleUpgradeWhenNeeded()
+    {
+        EditorApplication.delayCall += () =>
+        {
+            PresentationPrefabCatalog catalog = AssetDatabase.LoadAssetAtPath<PresentationPrefabCatalog>(
+                CatalogAssetPath
+            );
+            SpriteRenderer playerBaseRenderer = catalog != null && catalog.PlayerBasePrefab != null
+                ? catalog.PlayerBasePrefab.GetComponent<SpriteRenderer>()
+                : null;
+            bool usesPlaceholder = playerBaseRenderer == null ||
+                playerBaseRenderer.sprite == null ||
+                playerBaseRenderer.sprite.name == "Circle";
+
+            if (catalog == null ||
+                usesPlaceholder ||
+                catalog.AttackClip == null ||
+                catalog.HitClip == null ||
+                catalog.ProductionCompleteClip == null)
+            {
+                Generate();
+            }
+        };
+    }
 
     [MenuItem("Aegis RTS/Generate Presentation Prefabs")]
     public static void Generate()
@@ -19,8 +56,14 @@ public static class AegisPresentationPrefabGenerator
         EnsureDirectory(PrefabDirectory);
         EnsureDirectory(ResourceDirectory);
         EnsureDirectory(MaterialDirectory);
+        EnsureDirectory(AudioDirectory);
 
         Sprite circleSprite = GenerateCircleSprite();
+        Sprite playerInfantrySprite = LoadArtSprite(PlayerInfantryPath, circleSprite);
+        Sprite enemyInfantrySprite = LoadArtSprite(EnemyInfantryPath, circleSprite);
+        Sprite playerBaseSprite = LoadArtSprite(PlayerBasePath, circleSprite);
+        Sprite enemyBaseSprite = LoadArtSprite(EnemyBasePath, circleSprite);
+        Sprite factorySprite = LoadArtSprite(FactoryPath, circleSprite);
         Material gridMaterial = GetOrCreateGridMaterial();
         PresentationPrefabCatalog catalog = AssetDatabase.LoadAssetAtPath<PresentationPrefabCatalog>(
             CatalogAssetPath
@@ -32,48 +75,51 @@ public static class AegisPresentationPrefabGenerator
             AssetDatabase.CreateAsset(catalog, CatalogAssetPath);
         }
 
-        catalog.PlayerBasePrefab = CreateLabeledCirclePrefab(
+        catalog.PlayerBasePrefab = CreateEntityPrefab(
             "PlayerBaseView",
-            circleSprite,
-            new Color(0.25f, 0.55f, 1f, 1f),
+            playerBaseSprite,
             20,
-            "基地",
-            Color.white
+            0.012f,
+            0.35f,
+            1.4f
         );
-        catalog.EnemyBasePrefab = CreateLabeledCirclePrefab(
+        catalog.EnemyBasePrefab = CreateEntityPrefab(
             "EnemyBaseView",
-            circleSprite,
-            new Color(1f, 0.25f, 0.25f, 1f),
+            enemyBaseSprite,
             20,
-            "AI",
-            Color.white
+            0.012f,
+            0.35f,
+            1.4f
         );
-        catalog.FactoryPrefab = CreateLabeledCirclePrefab(
+        catalog.FactoryPrefab = CreateEntityPrefab(
             "FactoryView",
-            circleSprite,
-            new Color(0.35f, 0.9f, 0.45f, 1f),
+            factorySprite,
             20,
-            "兵厂",
-            Color.black
+            0.018f,
+            0.5f,
+            1.8f
         );
-        catalog.PlayerInfantryPrefab = CreateLabeledCirclePrefab(
+        catalog.PlayerInfantryPrefab = CreateEntityPrefab(
             "PlayerInfantryView",
-            circleSprite,
-            new Color(0.95f, 0.95f, 0.25f, 1f),
+            playerInfantrySprite,
             25,
-            "兵",
-            Color.black
+            0.035f,
+            1.5f,
+            3.2f
         );
-        catalog.EnemyInfantryPrefab = CreateLabeledCirclePrefab(
+        catalog.EnemyInfantryPrefab = CreateEntityPrefab(
             "EnemyInfantryView",
-            circleSprite,
-            new Color(1f, 0.45f, 0.15f, 1f),
+            enemyInfantrySprite,
             25,
-            "敌",
-            Color.black
+            0.035f,
+            1.5f,
+            3.2f
         );
         catalog.CircleOverlayPrefab = CreateCirclePrefab("CircleOverlayView", circleSprite);
         catalog.GridLinePrefab = CreateGridLinePrefab(gridMaterial);
+        catalog.AttackClip = GenerateAttackClip();
+        catalog.HitClip = GenerateHitClip();
+        catalog.ProductionCompleteClip = GenerateProductionCompleteClip();
 
         EditorUtility.SetDirty(catalog);
         AssetDatabase.SaveAssets();
@@ -106,7 +152,7 @@ public static class AegisPresentationPrefabGenerator
             CircleAssetPath
         );
         File.WriteAllBytes(absolutePath, texture.EncodeToPNG());
-        Object.DestroyImmediate(texture);
+        UnityEngine.Object.DestroyImmediate(texture);
         AssetDatabase.ImportAsset(CircleAssetPath, ImportAssetOptions.ForceSynchronousImport);
 
         TextureImporter importer = (TextureImporter)AssetImporter.GetAtPath(CircleAssetPath);
@@ -117,6 +163,119 @@ public static class AegisPresentationPrefabGenerator
         importer.mipmapEnabled = false;
         importer.SaveAndReimport();
         return AssetDatabase.LoadAssetAtPath<Sprite>(CircleAssetPath);
+    }
+
+    private static Sprite LoadArtSprite(string assetPath, Sprite fallback)
+    {
+        if (!File.Exists(GetAbsoluteAssetPath(assetPath)))
+        {
+            Debug.LogWarning($"Authored sprite is missing at {assetPath}; using circle fallback.");
+            return fallback;
+        }
+
+        AssetDatabase.ImportAsset(assetPath, ImportAssetOptions.ForceSynchronousImport);
+        Texture2D texture = AssetDatabase.LoadAssetAtPath<Texture2D>(assetPath);
+        TextureImporter importer = (TextureImporter)AssetImporter.GetAtPath(assetPath);
+        importer.textureType = TextureImporterType.Sprite;
+        importer.spriteImportMode = SpriteImportMode.Single;
+        importer.spritePixelsPerUnit = Mathf.Max(texture.width, texture.height);
+        importer.alphaIsTransparency = true;
+        importer.filterMode = FilterMode.Bilinear;
+        importer.mipmapEnabled = false;
+        importer.textureCompression = TextureImporterCompression.CompressedHQ;
+        importer.maxTextureSize = 2048;
+        importer.SaveAndReimport();
+        return AssetDatabase.LoadAssetAtPath<Sprite>(assetPath);
+    }
+
+    private static AudioClip GenerateAttackClip()
+    {
+        return GenerateAudioClip(AttackClipPath, 0.12f, t =>
+        {
+            float progress = t / 0.12f;
+            float envelope = Mathf.Pow(1f - progress, 2f);
+            float frequency = Mathf.Lerp(920f, 260f, progress);
+            float wave = Mathf.Sin(2f * Mathf.PI * frequency * t);
+            return wave * envelope * 0.72f;
+        });
+    }
+
+    private static AudioClip GenerateHitClip()
+    {
+        return GenerateAudioClip(HitClipPath, 0.16f, t =>
+        {
+            float progress = t / 0.16f;
+            float envelope = Mathf.Pow(1f - progress, 3f);
+            float low = Mathf.Sin(2f * Mathf.PI * 115f * t);
+            float metal = Mathf.Sin(2f * Mathf.PI * 347f * t) * 0.32f;
+            float texture = Mathf.Sin(2f * Mathf.PI * 1733f * t) * 0.12f;
+            return (low + metal + texture) * envelope * 0.75f;
+        });
+    }
+
+    private static AudioClip GenerateProductionCompleteClip()
+    {
+        float[] notes = { 523.25f, 659.25f, 783.99f };
+
+        return GenerateAudioClip(ProductionClipPath, 0.48f, t =>
+        {
+            const float noteDuration = 0.16f;
+            int noteIndex = Mathf.Min(notes.Length - 1, Mathf.FloorToInt(t / noteDuration));
+            float localTime = t - noteIndex * noteDuration;
+            float noteEnvelope = Mathf.Sin(Mathf.Clamp01(localTime / noteDuration) * Mathf.PI);
+            float wave = Mathf.Sin(2f * Mathf.PI * notes[noteIndex] * t);
+            float harmonic = Mathf.Sin(2f * Mathf.PI * notes[noteIndex] * 2f * t) * 0.2f;
+            return (wave + harmonic) * noteEnvelope * 0.58f;
+        });
+    }
+
+    private static AudioClip GenerateAudioClip(
+        string assetPath,
+        float duration,
+        Func<float, float> sampleFunction
+    )
+    {
+        const int sampleRate = 44100;
+        int sampleCount = Mathf.CeilToInt(duration * sampleRate);
+        int dataLength = sampleCount * sizeof(short);
+
+        using (MemoryStream stream = new MemoryStream(44 + dataLength))
+        using (BinaryWriter writer = new BinaryWriter(stream, Encoding.ASCII))
+        {
+            writer.Write(Encoding.ASCII.GetBytes("RIFF"));
+            writer.Write(36 + dataLength);
+            writer.Write(Encoding.ASCII.GetBytes("WAVE"));
+            writer.Write(Encoding.ASCII.GetBytes("fmt "));
+            writer.Write(16);
+            writer.Write((short)1);
+            writer.Write((short)1);
+            writer.Write(sampleRate);
+            writer.Write(sampleRate * sizeof(short));
+            writer.Write((short)sizeof(short));
+            writer.Write((short)16);
+            writer.Write(Encoding.ASCII.GetBytes("data"));
+            writer.Write(dataLength);
+
+            for (int i = 0; i < sampleCount; i++)
+            {
+                float time = (float)i / sampleRate;
+                short sample = (short)(Mathf.Clamp(sampleFunction(time), -1f, 1f) * short.MaxValue);
+                writer.Write(sample);
+            }
+
+            File.WriteAllBytes(GetAbsoluteAssetPath(assetPath), stream.ToArray());
+        }
+
+        AssetDatabase.ImportAsset(assetPath, ImportAssetOptions.ForceSynchronousImport);
+        return AssetDatabase.LoadAssetAtPath<AudioClip>(assetPath);
+    }
+
+    private static string GetAbsoluteAssetPath(string assetPath)
+    {
+        return Path.Combine(
+            Directory.GetParent(Application.dataPath).FullName,
+            assetPath
+        );
     }
 
     private static Material GetOrCreateGridMaterial()
@@ -133,29 +292,20 @@ public static class AegisPresentationPrefabGenerator
         return material;
     }
 
-    private static GameObject CreateLabeledCirclePrefab(
+    private static GameObject CreateEntityPrefab(
         string prefabName,
         Sprite sprite,
-        Color color,
         int sortingOrder,
-        string label,
-        Color labelColor
+        float idleScaleAmplitude,
+        float idleRotationDegrees,
+        float idleSpeed
     )
     {
-        GameObject root = CreateCircleTemplate(prefabName, sprite, color, sortingOrder);
-        GameObject labelObject = new GameObject("Label");
-        labelObject.transform.SetParent(root.transform);
-        labelObject.transform.localPosition = new Vector3(0f, 0f, -0.1f);
-        labelObject.transform.localScale = Vector3.one * 0.08f;
-
-        TextMesh textMesh = labelObject.AddComponent<TextMesh>();
-        textMesh.text = label;
-        textMesh.anchor = TextAnchor.MiddleCenter;
-        textMesh.alignment = TextAlignment.Center;
-        textMesh.fontSize = 48;
-        textMesh.color = labelColor;
-        labelObject.GetComponent<MeshRenderer>().sortingOrder = 40;
-
+        GameObject root = CreateCircleTemplate(prefabName, sprite, Color.white, sortingOrder);
+        RtsEntityViewAnimator animator = root.AddComponent<RtsEntityViewAnimator>();
+        animator.IdleScaleAmplitude = idleScaleAmplitude;
+        animator.IdleRotationDegrees = idleRotationDegrees;
+        animator.IdleSpeed = idleSpeed;
         return SavePrefab(root, prefabName);
     }
 
@@ -198,7 +348,7 @@ public static class AegisPresentationPrefabGenerator
     {
         string path = PrefabDirectory + "/" + prefabName + ".prefab";
         GameObject prefab = PrefabUtility.SaveAsPrefabAsset(root, path);
-        Object.DestroyImmediate(root);
+        UnityEngine.Object.DestroyImmediate(root);
         return prefab;
     }
 

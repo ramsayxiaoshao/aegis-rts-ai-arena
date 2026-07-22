@@ -9,6 +9,9 @@ public sealed class PresentationPrefabCatalog : ScriptableObject
     public GameObject EnemyInfantryPrefab;
     public GameObject CircleOverlayPrefab;
     public GameObject GridLinePrefab;
+    public AudioClip AttackClip;
+    public AudioClip HitClip;
+    public AudioClip ProductionCompleteClip;
 }
 
 internal enum PresentationEntityKind

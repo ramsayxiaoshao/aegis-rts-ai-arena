@@ -162,6 +162,7 @@ internal sealed class RtsCombatSystem
         publishFeedback?.Invoke(new CombatFeedbackEvent(
             attacker.Position,
             targetPosition,
+            attacker.GameObject,
             targetObject,
             attacker.Team,
             attacker.AttackDamage,
