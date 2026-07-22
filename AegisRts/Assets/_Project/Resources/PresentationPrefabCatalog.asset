@@ -19,3 +19,6 @@ MonoBehaviour:
   EnemyInfantryPrefab: {fileID: 7657542251164607040, guid: 07d4d5b51e7e3754c9fe9f68b32e7f41, type: 3}
   CircleOverlayPrefab: {fileID: 8122957500932493021, guid: ee4d1f87b30c9474a8865924a4df7b08, type: 3}
   GridLinePrefab: {fileID: 1785121510664962612, guid: 7ec883ad57217e04d89fe0c0000ddb19, type: 3}
+  AttackClip: {fileID: 8300000, guid: c6b482fc8c2481341a42f3a90967bcc4, type: 3}
+  HitClip: {fileID: 8300000, guid: 1e518ee3b9e5caa4aafab2f03e711d67, type: 3}
+  ProductionCompleteClip: {fileID: 8300000, guid: 0ffb8341d36fe8a458250330b00de7ad, type: 3}

@@ -69,6 +69,7 @@ internal sealed class EntityPresentationFactory : IDisposable
     )
     {
         GameObject template = GetEntityPrefab(entityKind);
+        bool usesAuthoredPrefab = template != null;
         GameObject circleObject = template != null
             ? UnityEngine.Object.Instantiate(template, parent)
             : CreateCircle(objectName, position, radius, color, sortingOrder, parent);
@@ -88,18 +89,23 @@ internal sealed class EntityPresentationFactory : IDisposable
             spriteRenderer.sprite = GetFallbackCircleSprite();
         }
 
-        spriteRenderer.color = color;
+        spriteRenderer.color = usesAuthoredPrefab ? Color.white : color;
         spriteRenderer.sortingOrder = sortingOrder;
 
         TextMesh textMesh = circleObject.GetComponentInChildren<TextMesh>();
 
-        if (textMesh == null)
+        if (textMesh == null && !usesAuthoredPrefab)
         {
             textMesh = CreateWorldLabel(circleObject.transform);
         }
 
-        textMesh.text = label;
-        textMesh.color = labelColor;
+        if (textMesh != null)
+        {
+            textMesh.gameObject.SetActive(!usesAuthoredPrefab);
+            textMesh.text = label;
+            textMesh.color = labelColor;
+        }
+
         return circleObject;
     }
 

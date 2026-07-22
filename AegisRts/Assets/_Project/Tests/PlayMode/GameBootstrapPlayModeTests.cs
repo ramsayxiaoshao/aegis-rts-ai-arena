@@ -28,7 +28,12 @@ public sealed class GameBootstrapPlayModeTests
         GameObject playerBase = GameObject.Find("Base");
         Assert.IsNotNull(playerBase);
         Assert.IsNotNull(playerBase.GetComponent<SpriteRenderer>()?.sprite);
-        Assert.AreEqual("基地", playerBase.GetComponentInChildren<TextMesh>()?.text);
+        Assert.AreNotEqual("Circle", playerBase.GetComponent<SpriteRenderer>().sprite.name);
+        Assert.IsNotNull(playerBase.GetComponent<RtsEntityViewAnimator>());
+        Assert.IsNull(playerBase.GetComponentInChildren<TextMesh>());
+        GameObject audioFeedback = GameObject.Find("AudioFeedback");
+        Assert.IsNotNull(audioFeedback);
+        Assert.IsNotNull(audioFeedback.GetComponent<AudioSource>());
 
         yield return null;
 
@@ -67,6 +72,7 @@ public sealed class GameBootstrapPlayModeTests
 
         GameObject infantry = GameObject.Find("Infantry");
         Assert.IsNotNull(infantry);
+        Assert.IsNotNull(infantry.GetComponent<RtsEntityViewAnimator>());
         healthBars = ui
             .GetComponentsInChildren<RectTransform>(true)
             .Where(rect => rect.name == "HealthBar")
